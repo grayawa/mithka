@@ -29,6 +29,7 @@ import 'custom_emoji.dart';
 import 'emoji_catalog.dart';
 import 'emoji_store.dart';
 import 'emoji_text_controller.dart';
+import 'checklist_composer_view.dart';
 import 'location_picker_view.dart';
 import 'poll_composer_view.dart';
 import 'sticker_store.dart';
@@ -129,7 +130,11 @@ class _ChatInputBarState extends State<ChatInputBar> {
     final status = await Permission.microphone.request();
     if (!status.isGranted) return;
     final r = FlutterSoundRecorder();
-    await r.openRecorder();
+    try {
+      await r.openRecorder();
+    } catch (_) {
+      return;
+    }
     if (!mounted) {
       await r.closeRecorder();
       return;
@@ -139,19 +144,49 @@ class _ChatInputBarState extends State<ChatInputBar> {
     setState(() => _recorder = r);
   }
 
+  /// Telegram voice notes want OGG/Opus, but not every Android encoder supports
+  /// it — pick the first codec the device can actually record.
+  Future<(Codec, String)?> _pickRecordCodec(
+    FlutterSoundRecorder r,
+    String dir,
+  ) async {
+    const candidates = [
+      (Codec.opusOGG, 'ogg'),
+      (Codec.opusWebM, 'webm'),
+      (Codec.aacADTS, 'aac'),
+      (Codec.aacMP4, 'm4a'),
+    ];
+    for (final (codec, ext) in candidates) {
+      if (await r.isEncoderSupported(codec)) {
+        return (
+          codec,
+          '$dir/voice_${DateTime.now().millisecondsSinceEpoch}.$ext',
+        );
+      }
+    }
+    return null;
+  }
+
   Future<void> _startRec() async {
     final r = _recorder;
     if (r == null || _recording) return;
     final dir = await getTemporaryDirectory();
-    _recPath = '${dir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.ogg';
+    final picked = await _pickRecordCodec(r, dir.path);
+    if (picked == null) return;
+    final (codec, path) = picked;
+    _recPath = path;
     _recordCancelled = false;
     _elapsed = 0;
-    await r.startRecorder(
-      toFile: _recPath,
-      codec: Codec.opusOGG,
-      sampleRate: 48000,
-      numChannels: 1,
-    );
+    try {
+      await r.startRecorder(
+        toFile: _recPath,
+        codec: codec,
+        sampleRate: 48000,
+        numChannels: 1,
+      );
+    } catch (_) {
+      return;
+    }
     if (!mounted) return;
     setState(() => _recording = true);
     _recTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
@@ -454,6 +489,28 @@ class _ChatInputBarState extends State<ChatInputBar> {
     widget.vm.sendPoll(question, options);
   }
 
+  /// 音频: pick an audio file and send it as a music message.
+  Future<void> _pickAudio() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(type: FileType.audio);
+      final path = result?.files.single.path;
+      if (path != null) widget.vm.sendAudio(path);
+    } catch (_) {
+      _pickFailed('音频');
+    }
+  }
+
+  /// 清单: collect a title + tasks and send a checklist (to-do list).
+  Future<void> _createChecklist() async {
+    final result = await Navigator.of(context).push<(String, List<String>)>(
+      MaterialPageRoute(builder: (_) => const ChecklistComposerView()),
+    );
+    if (result == null) return;
+    final (title, tasks) = result;
+    if (title.isEmpty || tasks.isEmpty) return;
+    widget.vm.sendChecklist(title, tasks);
+  }
+
   // MARK: - Function panel
 
   Widget _functionPanel() {
@@ -463,6 +520,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
       ('location.fill', '位置', _sendLocation),
       ('folder.fill', '文件', _pickFile),
       ('square.grid.2x2.fill', '投票', _createPoll),
+      ('music.note', '音频', _pickAudio),
+      ('checklist', '清单', _createChecklist),
     ];
     final c = context.colors;
     return Container(

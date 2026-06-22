@@ -84,6 +84,9 @@ const Map<String, IconData> _map = {
   'checkmark': CupertinoIcons.checkmark_alt,
   'link': CupertinoIcons.link,
   'mappin.and.ellipse': CupertinoIcons.placemark,
+  'music.note': CupertinoIcons.music_note,
+  'checklist': Icons.checklist,
+  'circle': CupertinoIcons.circle,
 
   // Misc
   'person.badge.plus': CupertinoIcons.person_add,

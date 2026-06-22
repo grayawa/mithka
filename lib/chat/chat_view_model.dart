@@ -305,6 +305,51 @@ class ChatViewModel extends ChangeNotifier {
     });
   }
 
+  /// 音频: send a picked audio file as a music message (TDLib computes metadata).
+  void sendAudio(String path) {
+    _client.send({
+      '@type': 'sendMessage',
+      'chat_id': chatId,
+      'input_message_content': {
+        '@type': 'inputMessageAudio',
+        'audio': {
+          '@type': 'inputAudio',
+          'audio': {'@type': 'inputFileLocal', 'path': path},
+          'duration': 0,
+          'title': '',
+          'performer': '',
+        },
+      },
+    });
+  }
+
+  /// 清单: send a checklist (to-do list). Creating checklists needs Premium.
+  void sendChecklist(String title, List<String> tasks) {
+    final items = tasks.map((t) => t.trim()).where((t) => t.isNotEmpty).toList();
+    if (title.trim().isEmpty || items.isEmpty) return;
+    _client.send({
+      '@type': 'sendMessage',
+      'chat_id': chatId,
+      'input_message_content': {
+        '@type': 'inputMessageChecklist',
+        'checklist': {
+          '@type': 'inputChecklist',
+          'title': {'@type': 'formattedText', 'text': title.trim()},
+          'tasks': [
+            for (var i = 0; i < items.length; i++)
+              {
+                '@type': 'inputChecklistTask',
+                'id': i + 1,
+                'text': {'@type': 'formattedText', 'text': items[i]},
+              },
+          ],
+          'others_can_add_tasks': false,
+          'others_can_mark_tasks_as_done': true,
+        },
+      },
+    });
+  }
+
   void sendPoll(String question, List<String> options) {
     final q = question.trim();
     final opts = options
