@@ -11,6 +11,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 
@@ -18,6 +19,7 @@ import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
 import 'call_media_engine.dart';
+import 'tgcalls_media_engine.dart';
 
 enum CallPhase {
   requesting, // outgoing, createCall sent, awaiting TDLib's call id
@@ -52,8 +54,12 @@ class ActiveCall {
 }
 
 class CallManager extends ChangeNotifier {
-  CallManager({CallMediaEngine? engine})
-    : _engine = engine ?? NoopCallMediaEngine();
+  CallManager({CallMediaEngine? engine}) : _engine = engine ?? _defaultEngine();
+
+  /// Android gets the real ntgcalls engine; other platforms fall back to Noop
+  /// (signaling works, no audio) until a native engine exists for them.
+  static CallMediaEngine _defaultEngine() =>
+      Platform.isAndroid ? TgcallsMediaEngine() : NoopCallMediaEngine();
 
   final TdClient _client = TdClient.shared;
   final CallMediaEngine _engine;
@@ -80,10 +86,32 @@ class CallManager extends ChangeNotifier {
   void start() {
     if (_started) return;
     _started = true;
+    // Outbound media signaling → TDLib. (v3/v4 calls negotiate WebRTC over this.)
+    _engine.onSignalingData = _sendSignaling;
     _sub = _client.subscribe().listen((update) {
-      if (update.type != 'updateCall') return;
-      final c = update.obj('call');
-      if (c != null) _handle(c);
+      switch (update.type) {
+        case 'updateCall':
+          final c = update.obj('call');
+          if (c != null) _handle(c);
+        case 'updateNewCallSignalingData':
+          // Inbound media signaling → the engine. `data` is base64 in TDLib JSON.
+          final d = update.str('data');
+          if (d != null) {
+            try {
+              _engine.receiveSignaling(base64.decode(d));
+            } catch (_) {}
+          }
+      }
+    });
+  }
+
+  void _sendSignaling(Uint8List data) {
+    final callId = call?.callId;
+    if (callId == null || callId == 0) return;
+    _client.send({
+      '@type': 'sendCallSignalingData',
+      'call_id': callId,
+      'data': base64.encode(data),
     });
   }
 
@@ -233,7 +261,9 @@ class CallManager extends ChangeNotifier {
 
         _engine.start(
           CallReadyConfig(
-            servers: state?.objects('servers') ?? const [],
+            callId: callId,
+            servers:
+                state?.objects('servers') ?? const <Map<String, dynamic>>[],
             encryptionKey: _decodeKey(state?.str('encryption_key')),
             config: state?.str('config') ?? '',
             customParameters: state?.str('custom_parameters') ?? '',
@@ -243,6 +273,7 @@ class CallManager extends ChangeNotifier {
             }(),
             isOutgoing: active.isOutgoing,
             isVideo: active.isVideo,
+            allowP2p: state?.boolean('allow_p2p') ?? true,
           ),
         );
 

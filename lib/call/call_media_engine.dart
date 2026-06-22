@@ -6,11 +6,10 @@
 //  `callStateReady` payload; the media engine is what actually carries audio /
 //  video over the negotiated relay servers using the agreed encryption key.
 //
-//  TDLib itself does NOT ship a media engine — that is the job of tgcalls (the
-//  WebRTC-based library Telegram apps embed). Until a tgcalls library is
-//  vendored into this project, `NoopCallMediaEngine` stands in: signaling works
-//  end to end (you can ring, accept, see the verification emojis, hang up), but
-//  no audio flows. Port of the Swift `CallMediaEngine`.
+//  TDLib itself does NOT ship a media engine. On Android the real engine is
+//  `TgcallsMediaEngine` (ntgcalls, via the CallMediaPlugin platform channel);
+//  `NoopCallMediaEngine` remains the fallback (e.g. iOS) where signaling works
+//  end to end but no audio flows. Port of the Swift `CallMediaEngine`.
 //
 
 import 'package:flutter/foundation.dart';
@@ -19,6 +18,7 @@ import 'package:flutter/foundation.dart';
 /// `callStateReady`. Built by `CallManager` and passed to `engine.start`.
 class CallReadyConfig {
   CallReadyConfig({
+    required this.callId,
     required this.servers,
     required this.encryptionKey,
     required this.config,
@@ -26,7 +26,11 @@ class CallReadyConfig {
     required this.libraryVersions,
     required this.isOutgoing,
     required this.isVideo,
+    required this.allowP2p,
   });
+
+  /// TDLib call id — used as the ntgcalls per-call handle.
+  final int callId;
   final List<Map<String, dynamic>> servers;
   final Uint8List encryptionKey;
   final String config;
@@ -34,6 +38,7 @@ class CallReadyConfig {
   final List<String> libraryVersions;
   final bool isOutgoing;
   final bool isVideo;
+  final bool allowP2p;
 }
 
 /// The media transport for an active call. A real implementation owns the
@@ -44,15 +49,18 @@ abstract class CallMediaEngine {
   void setMuted(bool muted);
   void setSpeaker(bool speaker);
   void setVideoEnabled(bool enabled);
+
+  /// Inbound TDLib `updateNewCallSignalingData` bytes → fed to the engine so the
+  /// WebRTC handshake can complete. No-op for engines that don't signal.
+  void receiveSignaling(Uint8List data) {}
+
+  /// Outbound signaling the engine emits, to be relayed via TDLib
+  /// `sendCallSignalingData`. `CallManager` sets this before `start`.
+  set onSignalingData(void Function(Uint8List data)? callback) {}
 }
 
 /// A do-nothing media engine that only logs. Lets the call signaling flow run
-/// end to end without any audio transport.
-///
-/// This is the single seam where a real tgcalls / WebRTC engine plugs in: once a
-/// tgcalls binding exists, implement `CallMediaEngine` on top of it (consuming
-/// the `CallReadyConfig` that `CallManager` builds from `callStateReady`) and
-/// swap `NoopCallMediaEngine` for it as the default engine in `CallManager`.
+/// end to end without any audio transport (used where no native engine exists).
 class NoopCallMediaEngine implements CallMediaEngine {
   @override
   void start(CallReadyConfig config) {
@@ -76,4 +84,10 @@ class NoopCallMediaEngine implements CallMediaEngine {
   @override
   void setVideoEnabled(bool enabled) =>
       debugPrint('📞 [media] setVideoEnabled $enabled');
+
+  @override
+  void receiveSignaling(Uint8List data) {}
+
+  @override
+  set onSignalingData(void Function(Uint8List data)? callback) {}
 }

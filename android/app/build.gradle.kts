@@ -71,3 +71,11 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // ntgcalls — a from-scratch C++ Telegram-calls engine (WebRTC + opus + libvpx
+    // statically bundled inside a self-contained libntgcalls.so per ABI). This is
+    // the real media transport behind the CallMediaEngine seam; CallMediaPlugin
+    // drives its 1:1 P2P API from the TDLib callStateReady payload.
+    implementation("io.github.pytgcalls:ntgcalls:2.2.5")
+}
