@@ -1,0 +1,757 @@
+//
+//  chat_view.dart
+//
+//  The conversation screen. A gray canvas hosting a scrolling transcript of
+//  bubbles, time separators and system banners, with a flat header and a pinned
+//  input bar. Backed by ChatViewModel. Port of the Swift `ChatView`.
+//
+
+import 'package:flutter/material.dart';
+import '../components/toast.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+
+import '../call/call_manager.dart';
+import '../components/sf_symbols.dart';
+import '../components/ui_components.dart';
+import '../profile/profile_detail_view.dart';
+import '../theme/app_theme.dart';
+import '../tdlib/td_models.dart';
+import 'chat_info_view.dart';
+import 'chat_input_bar.dart';
+import 'chat_picker_view.dart';
+import 'custom_emoji.dart';
+import 'emoji_store.dart';
+import 'chat_view_model.dart';
+import 'full_image_viewer.dart';
+import 'message_action_menu.dart';
+import 'message_bubble.dart';
+
+class ChatView extends StatefulWidget {
+  const ChatView({super.key, required this.chatId, required this.title});
+  final int chatId;
+  final String title;
+
+  @override
+  State<ChatView> createState() => _ChatViewState();
+}
+
+class _ChatViewState extends State<ChatView> {
+  late final ChatViewModel _vm = ChatViewModel(
+    chatId: widget.chatId,
+    title: widget.title,
+  );
+  final _scroll = ScrollController();
+  final _pinnedKey = GlobalKey(); // the pinned message's row, for scroll-to
+  ChatMessage? _actionTarget;
+  Rect? _actionRect; // global bounds of the long-pressed bubble
+  bool _reactionExpanded = false; // full reaction picker vs. quick bar
+  String _reactionTab = 'standard'; // 'standard' or a custom-emoji pack id
+  int _lastCount = 0;
+
+  /// Gap (seconds) between messages that triggers a fresh time separator.
+  static const _separatorGap = 300;
+
+  @override
+  void initState() {
+    super.initState();
+    _vm.addListener(_onModel);
+    _scroll.addListener(_onScroll);
+    _vm.onAppear();
+  }
+
+  void _onScroll() {
+    if (_scroll.hasClients && _scroll.position.pixels < 500) _vm.loadOlder();
+  }
+
+  void _onModel() {
+    if (!mounted) return;
+    if (_vm.messages.length != _lastCount) {
+      final restore = _vm.consumeRestoreTop();
+      _lastCount = _vm.messages.length;
+      if (restore == null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      }
+    }
+    setState(() {});
+  }
+
+  void _scrollToBottom() {
+    if (!_scroll.hasClients) return;
+    _scroll.jumpTo(_scroll.position.maxScrollExtent);
+  }
+
+  @override
+  void dispose() {
+    _vm.removeListener(_onModel);
+    _vm.onDisappear();
+    _vm.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  bool _needsUnreadDivider(int index) {
+    if (_vm.unreadCount <= 0) return false;
+    final m = _vm.messages[index];
+    if (m.isOutgoing || m.isService || m.id <= _vm.lastReadInboxId) {
+      return false;
+    }
+    if (index == 0) return true;
+    return _vm.messages[index - 1].id <= _vm.lastReadInboxId;
+  }
+
+  Widget _unreadDivider() {
+    final c = context.colors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(child: Divider(color: c.divider, height: 1)),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: Text(
+              '以下为新消息',
+              style: TextStyle(fontSize: 12, color: c.textSecondary),
+            ),
+          ),
+          Expanded(child: Divider(color: c.divider, height: 1)),
+        ],
+      ),
+    );
+  }
+
+  bool _needsSeparator(int index) {
+    if (index == 0) return true;
+    return _vm.messages[index].date - _vm.messages[index - 1].date >
+        _separatorGap;
+  }
+
+  bool _isRepeatTail(int index) {
+    final messages = _vm.messages;
+    if (index != messages.length - 1 || index == 0) return false;
+    final a = messages[index], b = messages[index - 1];
+    if (a.isService || b.isService) return false;
+    if (a.image != null || a.document != null) return false;
+    if (b.image != null || b.document != null) return false;
+    final ta = a.text.trim(), tb = b.text.trim();
+    return ta.isNotEmpty && ta == tb;
+  }
+
+  void _openImage(ChatMessage message) {
+    final pairs = _vm.messages
+        .where((m) => m.image != null && m.animatedSticker == null)
+        .toList();
+    final items = pairs.map((m) => m.image!).toList();
+    final start = pairs.indexWhere((m) => m.id == message.id);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) =>
+            FullImageViewer(items: items, startIndex: start < 0 ? 0 : start),
+      ),
+    );
+  }
+
+  void _perform(MessageAction action, ChatMessage message) {
+    setState(() => _actionTarget = null);
+    switch (action) {
+      case MessageAction.copy:
+        Clipboard.setData(ClipboardData(text: message.text));
+      case MessageAction.reply:
+        _vm.setReply(message);
+      case MessageAction.forward:
+        _forwardMessage(message);
+      case MessageAction.save:
+        _vm.saveToFavorites(message.id);
+      case MessageAction.saveSticker:
+        final id = message.animatedSticker?.id;
+        if (id != null) _vm.saveFavoriteSticker(id);
+      case MessageAction.delete:
+        _vm.deleteMessage(message.id);
+    }
+  }
+
+  void _openSenderProfile(ChatMessage m) {
+    final uid = _vm.isGroup ? m.senderId : _vm.peerUserId;
+    if (uid == null || uid <= 0) {
+      return; // channels post as the chat, not a user
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            ProfileDetailView(userId: uid, name: m.senderName ?? _vm.peerTitle),
+      ),
+    );
+  }
+
+  void _startCall(bool isVideo) {
+    final uid = _vm.peerUserId;
+    if (uid == null) {
+      showToast(context, '仅支持与联系人通话');
+      return;
+    }
+    context.read<CallManager>().startCall(uid, isVideo);
+  }
+
+  Future<void> _forwardMessage(ChatMessage message) async {
+    final target = await Navigator.of(context).push<ChatSummary>(
+      MaterialPageRoute(builder: (_) => const ChatPickerView(title: '转发到')),
+    );
+    if (target == null || !mounted) return;
+    _vm.forward(message.id, target.id);
+    showToast(context, '已转发到 ${target.title}');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Scaffold(
+      backgroundColor: c.chatBackground,
+      // The input bar manages the keyboard inset itself (see ChatInputBar), so
+      // an open emoji/+ panel sits flush instead of leaving a keyboard-sized gap.
+      resizeToAvoidBottomInset: false,
+      body: Stack(
+        children: [
+          Column(
+            children: [
+              _header(),
+              if (_vm.pinnedMessage != null && !_vm.pinnedDismissed)
+                _pinnedBar(_vm.pinnedMessage!),
+              Expanded(child: _transcript()),
+              ChatInputBar(vm: _vm, onStartCall: _startCall),
+            ],
+          ),
+          if (_actionTarget != null) _actionMenuOverlay(),
+        ],
+      ),
+    );
+  }
+
+  Widget _header() {
+    final c = context.colors;
+    final subtitle = _vm.subtitle;
+    final typing = subtitle.endsWith('正在输入…');
+    return Container(
+      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      decoration: BoxDecoration(
+        color: c.navBar,
+        border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
+      ),
+      child: SizedBox(
+        height: 48,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Row(
+            children: [
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.of(context).pop(),
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 10),
+                  child: Icon(
+                    sfIcon('chevron.left'),
+                    size: 22,
+                    color: c.textPrimary,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _vm.headerTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: c.textPrimary,
+                      ),
+                    ),
+                    if (subtitle.isNotEmpty)
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: typing ? AppTheme.brand : c.textSecondary,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => ChatInfoView(
+                      chatId: widget.chatId,
+                      title: _vm.peerTitle,
+                    ),
+                  ),
+                ),
+                child: Icon(
+                  sfIcon('line.3.horizontal'),
+                  size: 22,
+                  color: c.textPrimary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _pinnedBar(ChatMessage pinned) {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _scrollToMessage(pinned.id),
+      child: Container(
+        height: 44,
+        decoration: BoxDecoration(
+          color: c.navBar,
+          border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(
+          children: [
+            Container(width: 3, height: 28, color: AppTheme.brand),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '置顶消息',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.brand,
+                    ),
+                  ),
+                  Text(
+                    pinned.text.isEmpty
+                        ? '[消息]'
+                        : pinned.text.replaceAll('\n', ' '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, color: c.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _vm.dismissPinned,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8),
+                child: Icon(sfIcon('xmark'), size: 16, color: c.textSecondary),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Scrolls the transcript to the pinned message. If it's already built, uses
+  /// ensureVisible; otherwise jumps near its position (or loads older history)
+  /// and retries a few times until the row is in the tree.
+  Future<void> _scrollToMessage(int messageId) async {
+    for (var tries = 0; tries < 8; tries++) {
+      final ctx = _pinnedKey.currentContext;
+      if (ctx != null && ctx.mounted) {
+        await Scrollable.ensureVisible(
+          ctx,
+          alignment: 0.3,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+        return;
+      }
+      if (!_scroll.hasClients) return;
+      final index = _vm.messages.indexWhere((m) => m.id == messageId);
+      if (index >= 0) {
+        // In the list but off-screen — jump near it so the row builds.
+        final max = _scroll.position.maxScrollExtent;
+        final frac = index / _vm.messages.length;
+        _scroll.jumpTo((max * frac).clamp(0.0, max));
+      } else {
+        // Not loaded yet — go to the top to pull older history.
+        _scroll.jumpTo(0);
+        _vm.loadOlder();
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 220));
+      if (!mounted) return;
+    }
+  }
+
+  Widget _transcript() {
+    final messages = _vm.messages;
+    return Container(
+      color: context.colors.chatBackground,
+      child: ListView.builder(
+        controller: _scroll,
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: messages.length,
+        itemBuilder: (context, index) {
+          final message = messages[index];
+          return Column(
+            key: message.id == _vm.pinnedMessage?.id ? _pinnedKey : null,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_needsUnreadDivider(index)) _unreadDivider(),
+              if (_needsSeparator(index)) TimeSeparator(unix: message.date),
+              if (message.isService)
+                SystemBanner(text: message.text)
+              else
+                MessageBubble(
+                  message: message,
+                  peerTitle: _vm.peerTitle,
+                  peerPhoto: _vm.peerPhoto,
+                  isGroup: _vm.isGroup,
+                  meName: _vm.meName,
+                  mePhoto: _vm.mePhoto,
+                  showRepeat: _isRepeatTail(index),
+                  onRepeat: () => _vm.repeatMessage(message),
+                  onLongPress: (m, rect) => setState(() {
+                    _actionTarget = m;
+                    _actionRect = rect;
+                    _reactionExpanded = false;
+                    _reactionTab = 'standard';
+                  }),
+                  onReply: (m) => _vm.setReply(m),
+                  onAvatarTap: _openSenderProfile,
+                  onAvatarLongPress: (m) {
+                    if (_vm.isGroup && (m.senderName?.isNotEmpty ?? false)) {
+                      _vm.insertMention(m.senderName!);
+                    }
+                  },
+                  onOpenImage: _openImage,
+                  isRead: _vm.isRead(message),
+                  onToggleReaction: (r) => _vm.toggleReaction(message, r),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  static const _quickReactions = ['👍', '❤️', '🔥', '🎉', '😁', '😢', '😡'];
+
+  /// The fuller set shown when the quick bar is expanded.
+  static const _allReactions = [
+    '👍',
+    '👎',
+    '❤️',
+    '🔥',
+    '🥰',
+    '👏',
+    '😁',
+    '🤔',
+    '🤯',
+    '😱',
+    '🤬',
+    '😢',
+    '🎉',
+    '🤩',
+    '🤮',
+    '💩',
+    '🙏',
+    '👌',
+    '🕊️',
+    '🤡',
+    '🥱',
+    '🥴',
+    '😍',
+    '🐳',
+    '🌚',
+    '🌭',
+    '💯',
+    '🤣',
+    '⚡',
+    '🍌',
+    '🏆',
+    '💔',
+    '🤨',
+    '😐',
+    '🍓',
+    '🍾',
+    '💋',
+    '🖕',
+    '😈',
+    '😴',
+  ];
+
+  void _react(String emoji) {
+    final target = _actionTarget;
+    setState(() {
+      _actionTarget = null;
+      _reactionExpanded = false;
+    });
+    if (target != null) _vm.addReaction(target.id, emoji);
+  }
+
+  void _reactCustom(int customEmojiId) {
+    final target = _actionTarget;
+    setState(() {
+      _actionTarget = null;
+      _reactionExpanded = false;
+    });
+    if (target != null) _vm.addCustomReaction(target.id, customEmojiId);
+  }
+
+  Widget _actionMenuOverlay() {
+    final media = MediaQuery.of(context);
+    final screenH = media.size.height;
+    final topSafe = media.padding.top + 8;
+    final bottomSafe = screenH - media.padding.bottom - 8;
+    final outgoing = _actionTarget!.isOutgoing;
+    final rect = _actionRect;
+
+    final reactionH = _reactionExpanded ? 268.0 : 48.0;
+    const menuH = 84.0;
+    const gap = 8.0;
+
+    double reactionTop, menuTop;
+    if (rect != null) {
+      // Reaction bar above the message, action menu below it.
+      reactionTop = (rect.top - reactionH - gap).clamp(
+        topSafe,
+        bottomSafe - reactionH,
+      );
+      menuTop = (rect.bottom + gap).clamp(topSafe, bottomSafe - menuH);
+    } else {
+      reactionTop = (screenH - reactionH - menuH - gap) / 2;
+      menuTop = reactionTop + reactionH + gap;
+    }
+    final align = outgoing ? Alignment.centerRight : Alignment.centerLeft;
+
+    void dismiss() => setState(() {
+      _actionTarget = null;
+      _actionRect = null;
+      _reactionExpanded = false;
+    });
+
+    return Positioned.fill(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: dismiss,
+              child: Container(color: Colors.black.withValues(alpha: 0.25)),
+            ),
+          ),
+          // Call logs and other special messages aren't reactable — no +1 bar.
+          if (!_actionTarget!.isCall)
+            Positioned(
+              top: reactionTop,
+              left: 10,
+              right: 10,
+              child: Align(
+                alignment: align,
+                child: _reactionExpanded
+                    ? _expandedReactionPicker()
+                    : _quickReactionBar(),
+              ),
+            ),
+          Positioned(
+            top: menuTop,
+            left: 10,
+            right: 10,
+            child: Align(
+              alignment: align,
+              child: MessageActionMenu(
+                message: _actionTarget!,
+                onSelect: (action) => _perform(action, _actionTarget!),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _quickReactionBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2C2C2E),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 12),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final e in _quickReactions)
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _react(e),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                child: Text(e, style: const TextStyle(fontSize: 28)),
+              ),
+            ),
+          // Expand → full (tabbed, for premium) reaction picker.
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              EmojiStore.shared.loadIfNeeded();
+              setState(() => _reactionExpanded = true);
+            },
+            child: Container(
+              margin: const EdgeInsets.only(left: 2),
+              width: 34,
+              height: 34,
+              decoration: const BoxDecoration(
+                color: Color(0xFF3A3A3C),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.keyboard_arrow_down,
+                size: 22,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _expandedReactionPicker() {
+    final store = EmojiStore.shared;
+    final packs = store.isPremium ? store.customPacks : const [];
+    return Container(
+      width: 300,
+      height: 268,
+      decoration: BoxDecoration(
+        color: const Color(0xFF2C2C2E),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 12),
+        ],
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          Expanded(child: _reactionContent(packs)),
+          if (packs.isNotEmpty) _reactionTabStrip(packs),
+        ],
+      ),
+    );
+  }
+
+  Widget _reactionContent(List packs) {
+    if (_reactionTab != 'standard') {
+      final id = int.tryParse(_reactionTab);
+      CustomEmojiPack? pack;
+      for (final p in packs) {
+        if (p.id == id) {
+          pack = p;
+          break;
+        }
+      }
+      if (pack != null) {
+        return GridView.count(
+          crossAxisCount: 6,
+          padding: const EdgeInsets.all(10),
+          children: [
+            for (final item in pack.emoji)
+              if (item.customEmojiId != 0)
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => _reactCustom(item.customEmojiId),
+                  child: Padding(
+                    padding: const EdgeInsets.all(3),
+                    child: CustomEmojiView(
+                      id: item.customEmojiId,
+                      size: 34,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+          ],
+        );
+      }
+    }
+    return GridView.count(
+      crossAxisCount: 7,
+      padding: const EdgeInsets.all(10),
+      children: [
+        for (final e in _allReactions)
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _react(e),
+            child: Center(child: Text(e, style: const TextStyle(fontSize: 26))),
+          ),
+      ],
+    );
+  }
+
+  Widget _reactionTabStrip(List packs) {
+    return Container(
+      height: 46,
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Color(0xFF3A3A3C), width: 0.5)),
+      ),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        children: [
+          _reactionTab2(
+            'standard',
+            const Icon(
+              Icons.emoji_emotions_outlined,
+              size: 22,
+              color: Colors.white70,
+            ),
+          ),
+          for (final pack in packs)
+            _reactionTab2(
+              pack.id.toString(),
+              pack.emoji.isNotEmpty && pack.emoji.first.customEmojiId != 0
+                  ? CustomEmojiView(
+                      id: pack.emoji.first.customEmojiId,
+                      size: 26,
+                      color: Colors.white,
+                    )
+                  : const Icon(
+                      Icons.workspaces_outline,
+                      size: 20,
+                      color: Colors.white70,
+                    ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reactionTab2(String key, Widget child) {
+    final selected = _reactionTab == key;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => setState(() => _reactionTab = key),
+      child: Container(
+        width: 40,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF4A4A4E) : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: SizedBox(width: 28, height: 28, child: Center(child: child)),
+      ),
+    );
+  }
+}

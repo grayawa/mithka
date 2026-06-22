@@ -1,0 +1,360 @@
+//
+//  general_settings_view.dart
+//
+//  通用 (General): 深色模式 + 标签栏样式 (both drive ThemeController live), 存储空间
+//  (live cache size + clear), and 聊天 preference toggles. Port of the Swift
+//  `GeneralSettingsView` / `GeneralSettingsViewModel`.
+//
+
+import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../components/sf_symbols.dart';
+import '../components/ui_components.dart';
+import '../tdlib/json_helpers.dart';
+import '../tdlib/td_client.dart';
+import '../theme/app_theme.dart';
+import '../theme/theme_controller.dart';
+
+class GeneralSettingsView extends StatefulWidget {
+  const GeneralSettingsView({super.key});
+
+  @override
+  State<GeneralSettingsView> createState() => _GeneralSettingsViewState();
+}
+
+class _GeneralSettingsViewState extends State<GeneralSettingsView> {
+  String _cacheSize = '—';
+  bool _loadingCache = true;
+  bool _clearing = false;
+  bool _enterToSend = false;
+  bool _largeText = false;
+  SharedPreferences? _prefs;
+
+  static const _appearanceColor = Color(0xFF6A5BE2);
+  static const _tabColor = Color(0xFF16B0A0);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrefs();
+    _loadCache();
+  }
+
+  Future<void> _loadPrefs() async {
+    _prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _enterToSend = _prefs!.getBool('enterToSend') ?? false;
+      _largeText = _prefs!.getBool('largeText') ?? false;
+    });
+  }
+
+  Future<void> _loadCache() async {
+    setState(() => _loadingCache = true);
+    try {
+      final stats = await TdClient.shared.query({
+        '@type': 'getStorageStatisticsFast',
+      });
+      _cacheSize = _formatBytes(stats.int64('files_size') ?? 0);
+    } catch (_) {
+      _cacheSize = '—';
+    }
+    if (mounted) setState(() => _loadingCache = false);
+  }
+
+  Future<void> _clearCache() async {
+    setState(() => _clearing = true);
+    TdClient.shared.send({
+      '@type': 'optimizeStorage',
+      'size': 0,
+      'ttl': 0,
+      'count': 0,
+      'immunity_delay': 0,
+      'chat_limit': 0,
+      'return_deleted_file_statistics': false,
+    });
+    await Future.delayed(const Duration(milliseconds: 800));
+    if (mounted) setState(() => _clearing = false);
+    await _loadCache();
+  }
+
+  static String _formatBytes(int bytes) {
+    final b = bytes < 0 ? 0 : bytes;
+    if (b < 1024) return '$b B';
+    const units = ['KB', 'MB', 'GB'];
+    var size = b / 1024;
+    var i = 0;
+    while (size >= 1024 && i < units.length - 1) {
+      size /= 1024;
+      i++;
+    }
+    return '${size.toStringAsFixed(1)} ${units[i]}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(title: '通用', onBack: () => Navigator.of(context).pop()),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
+              children: [
+                _appearanceCard(),
+                const SizedBox(height: 14),
+                _tabBarCard(),
+                const SizedBox(height: 14),
+                _storageCard(),
+                const SizedBox(height: 14),
+                _chatCard(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sectionHeader(String title) => Padding(
+    padding: const EdgeInsets.only(left: 16, bottom: 6),
+    child: Align(
+      alignment: Alignment.centerLeft,
+      child: Text(
+        title,
+        style: TextStyle(fontSize: 13, color: context.colors.textTertiary),
+      ),
+    ),
+  );
+
+  Widget _iconBadge(String icon, Color color) => Container(
+    width: 28,
+    height: 28,
+    decoration: BoxDecoration(
+      color: color,
+      borderRadius: BorderRadius.circular(7),
+    ),
+    child: Icon(sfIcon(icon), size: 15, color: Colors.white),
+  );
+
+  Widget _card(List<Widget> children) {
+    return Container(
+      decoration: BoxDecoration(
+        color: context.colors.card,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(children: children),
+    );
+  }
+
+  Widget _selectRow(
+    String icon,
+    Color color,
+    String label,
+    bool selected,
+    VoidCallback onTap,
+  ) {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: 52,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              _iconBadge(icon, color),
+              const SizedBox(width: 12),
+              Text(label, style: TextStyle(fontSize: 16, color: c.textPrimary)),
+              const Spacer(),
+              if (selected)
+                Icon(sfIcon('checkmark'), size: 16, color: AppTheme.brand),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _appearanceCard() {
+    final theme = context.watch<ThemeController>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader('深色模式'),
+        _card([
+          for (var i = 0; i < AppearanceMode.values.length; i++) ...[
+            _selectRow(
+              AppearanceMode.values[i].name == 'system'
+                  ? 'circle.lefthalf.filled'
+                  : AppearanceMode.values[i].name == 'light'
+                  ? 'sun.max.fill'
+                  : 'moon.fill',
+              _appearanceColor,
+              AppearanceMode.values[i].label,
+              theme.mode == AppearanceMode.values[i],
+              () => context.read<ThemeController>().mode =
+                  AppearanceMode.values[i],
+            ),
+            if (i < AppearanceMode.values.length - 1)
+              const InsetDivider(leadingInset: 56),
+          ],
+        ]),
+      ],
+    );
+  }
+
+  Widget _tabBarCard() {
+    final theme = context.watch<ThemeController>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader('标签栏样式'),
+        _card([
+          for (var i = 0; i < TabBarStyle.values.length; i++) ...[
+            _selectRow(
+              TabBarStyle.values[i].name == 'classic'
+                  ? 'rectangle.split.3x1.fill'
+                  : 'sparkles',
+              _tabColor,
+              TabBarStyle.values[i].label,
+              theme.tabBarStyle == TabBarStyle.values[i],
+              () => context.read<ThemeController>().tabBarStyle =
+                  TabBarStyle.values[i],
+            ),
+            if (i < TabBarStyle.values.length - 1)
+              const InsetDivider(leadingInset: 56),
+          ],
+        ]),
+      ],
+    );
+  }
+
+  Widget _storageCard() {
+    final c = context.colors;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader('存储空间'),
+        _card([
+          SizedBox(
+            height: 52,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  _iconBadge('folder.fill', const Color(0xFF16B0A0)),
+                  const SizedBox(width: 12),
+                  Text(
+                    '缓存大小',
+                    style: TextStyle(fontSize: 16, color: c.textPrimary),
+                  ),
+                  const Spacer(),
+                  if (_loadingCache)
+                    const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Text(
+                      _cacheSize,
+                      style: TextStyle(fontSize: 15, color: c.textSecondary),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const InsetDivider(leadingInset: 56),
+          GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _clearing || _loadingCache ? null : _clearCache,
+            child: SizedBox(
+              height: 52,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Text(
+                      _clearing ? '正在清除…' : '清除缓存',
+                      style: TextStyle(fontSize: 16, color: AppTheme.tagRed),
+                    ),
+                    const Spacer(),
+                    if (_clearing)
+                      const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Widget _chatCard() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader('聊天'),
+        _card([
+          _toggleRow(
+            'arrowshape.turn.up.left',
+            const Color(0xFF3C8CF0),
+            '回车键发送消息',
+            _enterToSend,
+            (v) {
+              setState(() => _enterToSend = v);
+              _prefs?.setBool('enterToSend', v);
+            },
+          ),
+          const InsetDivider(leadingInset: 56),
+          _toggleRow('doc', const Color(0xFFF5A623), '大字体', _largeText, (v) {
+            setState(() => _largeText = v);
+            _prefs?.setBool('largeText', v);
+          }),
+        ]),
+      ],
+    );
+  }
+
+  Widget _toggleRow(
+    String icon,
+    Color color,
+    String title,
+    bool value,
+    ValueChanged<bool> onChanged,
+  ) {
+    final c = context.colors;
+    return SizedBox(
+      height: 52,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          children: [
+            _iconBadge(icon, color),
+            const SizedBox(width: 12),
+            Text(title, style: TextStyle(fontSize: 16, color: c.textPrimary)),
+            const Spacer(),
+            CupertinoSwitch(
+              value: value,
+              activeTrackColor: AppTheme.brand,
+              onChanged: onChanged,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

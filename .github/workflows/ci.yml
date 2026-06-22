@@ -1,0 +1,40 @@
+name: CI
+
+# Runs on the release branch (and PRs into it). A full app build needs the
+# platform-specific TDLib binary (git-ignored), so CI runs the dependency-light
+# static checks: analyze + tests. secrets.dart is git-ignored, so it is
+# materialised from the committed example before analysis.
+on:
+  push:
+    branches: [release]
+  pull_request:
+    branches: [release]
+  workflow_dispatch:
+
+jobs:
+  analyze-test:
+    name: Analyze & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.2'
+          channel: stable
+          cache: true
+
+      - name: Set up secrets (git-ignored at rest)
+        run: cp lib/config/secrets_example.dart lib/config/secrets.dart
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Verify formatting
+        run: dart format --output=none --set-exit-if-changed .
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
