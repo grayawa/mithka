@@ -2,8 +2,10 @@ name: CI
 
 # Runs on the release branch (and PRs into it). A full app build needs the
 # platform-specific TDLib binary (git-ignored), so CI runs the dependency-light
-# static checks: analyze + tests. secrets.dart is git-ignored, so it is
-# materialised from the committed example before analysis.
+# static checks: format + analyze + tests. secrets.dart is git-ignored, so it is
+# generated on the runner from the TELEGRAM_API_ID / TELEGRAM_API_HASH repository
+# secrets (falling back to 0 / empty when unset — analyze + tests don't need real
+# credentials).
 on:
   push:
     branches: [release]
@@ -24,14 +26,24 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Set up secrets (git-ignored at rest)
-        run: cp lib/config/secrets_example.dart lib/config/secrets.dart
-
       - name: Install dependencies
         run: flutter pub get
 
       - name: Verify formatting
-        run: dart format --output=none --set-exit-if-changed .
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Write secrets.dart from repository secrets
+        env:
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          cat > lib/config/secrets.dart <<EOF
+          class Secrets {
+            static const int apiId = ${TELEGRAM_API_ID:-0};
+            static const String apiHash = '${TELEGRAM_API_HASH}';
+            static bool get isConfigured => apiId != 0 && apiHash.isNotEmpty;
+          }
+          EOF
 
       - name: Analyze
         run: flutter analyze
