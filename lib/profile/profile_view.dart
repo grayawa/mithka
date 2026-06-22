@@ -711,7 +711,14 @@ class _ProfileViewState extends State<ProfileView> {
   Widget _bottomBar() {
     final c = context.colors;
     final theme = context.watch<ThemeController>();
-    final isDark = theme.mode == AppearanceMode.dark;
+    // Derive from the EFFECTIVE brightness, not just the stored mode: when mode
+    // is `system` the rendered brightness comes from the OS, so a plain
+    // `mode==dark` check would mislabel the button and the toggle could resolve
+    // to the same brightness (a visible no-op after the first tap).
+    final isDark =
+        theme.mode == AppearanceMode.dark ||
+        (theme.mode == AppearanceMode.system &&
+            MediaQuery.platformBrightnessOf(context) == Brightness.dark);
     return Container(
       decoration: BoxDecoration(
         color: c.navBar,
@@ -736,8 +743,10 @@ class _ProfileViewState extends State<ProfileView> {
               Expanded(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
+                  // Flip between EXPLICIT light/dark every tap (never `system`,
+                  // which could equal the current brightness and do nothing).
                   onTap: () => theme.mode = isDark
-                      ? AppearanceMode.system
+                      ? AppearanceMode.light
                       : AppearanceMode.dark,
                   child: _barItem(
                     isDark ? 'sun.max.fill' : 'moon.fill',
