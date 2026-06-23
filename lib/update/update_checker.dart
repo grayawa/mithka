@@ -73,8 +73,7 @@ class UpdateChecker {
   }
 
   static Future<_Release?> _fetchLatest() async {
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 8);
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     try {
       final req = await client.getUrl(
         Uri.parse(

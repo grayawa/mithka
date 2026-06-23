@@ -214,7 +214,11 @@ class _ProfileViewState extends State<ProfileView> {
                 onTap: () => pick(id),
                 child: Padding(
                   padding: const EdgeInsets.all(5),
-                  child: CustomEmojiView(id: id, size: 34, color: c.textPrimary),
+                  child: CustomEmojiView(
+                    id: id,
+                    size: 34,
+                    color: c.textPrimary,
+                  ),
                 ),
               ),
           ],
@@ -808,7 +812,6 @@ class _ProfileViewState extends State<ProfileView> {
       ],
     );
   }
-
 }
 
 /// QQ-style VIP indicator shown next to a Telegram Premium user's name: the QQ

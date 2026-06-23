@@ -610,7 +610,9 @@ abstract final class TDParse {
             // the full sticker file — the thumbnail is low-res and looks blurry
             // scaled up. Animated (.tgs) / video (.webm) keep the thumb only as a
             // placeholder behind the rendered animation.
-            image: (isTgs || isWebm) ? (thumb ?? stickerFile) : (stickerFile ?? thumb),
+            image: (isTgs || isWebm)
+                ? (thumb ?? stickerFile)
+                : (stickerFile ?? thumb),
             width: w,
             height: h,
             animated: isTgs ? stickerFile : null,
@@ -631,7 +633,9 @@ abstract final class TDParse {
           final isTgs = fmt == 'stickerFormatTgs';
           final isWebm = fmt == 'stickerFormatWebm';
           return MediaAttachment(
-            image: (isTgs || isWebm) ? (thumb ?? stickerFile) : (stickerFile ?? thumb),
+            image: (isTgs || isWebm)
+                ? (thumb ?? stickerFile)
+                : (stickerFile ?? thumb),
             width: w,
             height: h,
             animated: isTgs ? stickerFile : null,

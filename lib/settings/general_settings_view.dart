@@ -257,7 +257,10 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
             child: Row(
               children: [
-                Text('A', style: TextStyle(fontSize: 14, color: c.textSecondary)),
+                Text(
+                  'A',
+                  style: TextStyle(fontSize: 14, color: c.textSecondary),
+                ),
                 Expanded(
                   child: CupertinoSlider(
                     value: idx.toDouble(),
@@ -265,8 +268,9 @@ class _GeneralSettingsViewState extends State<GeneralSettingsView> {
                     max: (steps.length - 1).toDouble(),
                     divisions: steps.length - 1,
                     activeColor: AppTheme.brand,
-                    onChanged: (v) => context.read<ThemeController>().fontScale =
-                        steps[v.round()],
+                    onChanged: (v) =>
+                        context.read<ThemeController>().fontScale =
+                            steps[v.round()],
                   ),
                 ),
                 Text('A', style: TextStyle(fontSize: 24, color: c.textPrimary)),

@@ -230,9 +230,7 @@ class _ChatViewState extends State<ChatView> {
         final sid = message.stickerSetId;
         if (sid != null) {
           Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => StickerSetDetailView(setId: sid),
-            ),
+            MaterialPageRoute(builder: (_) => StickerSetDetailView(setId: sid)),
           );
         }
       case MessageAction.delete:

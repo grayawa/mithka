@@ -56,3 +56,10 @@ lib/config/secrets.dart
 android/app/src/main/jniLibs/
 **/tdjson.xcframework/
 .tdlib-build/
+
+# One-time working notes (not part of the app)
+/CLAUDE.md
+/SESSION.md
+/TODO.md
+# Stray icon-generator output at repo root (real icons live in android/.../res/)
+/res/

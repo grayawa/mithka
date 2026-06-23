@@ -62,7 +62,8 @@ class MessageBubble extends StatefulWidget {
   final ValueChanged<ChatMessage>? onAvatarLongPress;
   final ValueChanged<ChatMessage>? onOpenImage;
   final ValueChanged<MessageReaction>? onToggleReaction;
-  final ValueChanged<bool>? onRedial; // tap a call log to redial (bool = isVideo)
+  final ValueChanged<bool>?
+  onRedial; // tap a call log to redial (bool = isVideo)
   final bool isRead; // outgoing message read by the peer (✓✓)
 
   @override
@@ -901,9 +902,9 @@ class _MessageBubbleState extends State<MessageBubble> {
     final c = context.colors;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => FileDetailView(doc: doc)),
-      ),
+      onTap: () => Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => FileDetailView(doc: doc))),
       child: Container(
         width: 244,
         padding: const EdgeInsets.all(12),
