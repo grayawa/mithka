@@ -27,6 +27,7 @@ import 'custom_emoji.dart';
 import 'file_detail_view.dart';
 import 'video_sticker_view.dart';
 import 'link_handler.dart';
+import 'location_detail_view.dart';
 import 'voice_audio.dart';
 
 const List<Color> _telegramAccentColors = [
@@ -985,51 +986,59 @@ class _MessageBubbleState extends State<MessageBubble> {
 
   Widget _locationBubble(MessageLocation location) {
     final c = context.colors;
-    return Container(
-      width: 220,
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: c.divider, width: 0.5),
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => LocationDetailView(location: location),
+        ),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  (location.title?.isNotEmpty ?? false)
-                      ? location.title!
-                      : '位置',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                    color: c.bubbleIncomingText,
-                  ),
-                ),
-                if (location.address?.isNotEmpty ?? false) ...[
-                  const SizedBox(height: 3),
+      child: Container(
+        width: 220,
+        decoration: BoxDecoration(
+          color: c.card,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: c.divider, width: 0.5),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
                   Text(
-                    location.address!,
-                    maxLines: 2,
+                    (location.title?.isNotEmpty ?? false)
+                        ? location.title!
+                        : '位置',
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: c.textSecondary),
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: c.bubbleIncomingText,
+                    ),
                   ),
+                  if (location.address?.isNotEmpty ?? false) ...[
+                    const SizedBox(height: 3),
+                    Text(
+                      location.address!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12, color: c.textSecondary),
+                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
-          ),
-          _MapThumbnail(
-            latitude: location.latitude,
-            longitude: location.longitude,
-          ),
-        ],
+            _MapThumbnail(
+              latitude: location.latitude,
+              longitude: location.longitude,
+            ),
+          ],
+        ),
       ),
     );
   }

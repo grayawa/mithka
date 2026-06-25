@@ -52,6 +52,7 @@ class ChatListViewModel extends ChangeNotifier {
   final Set<String> _loadingChatLists = {};
   final Set<String> _exhaustedChatLists = {};
   static const _pageSize = 100;
+  static const _hydrateLimit = 1000;
 
   void onAppear() {
     if (_listening) return;
@@ -191,7 +192,7 @@ class ChatListViewModel extends ChangeNotifier {
   }
 
   void _loadChats(int limit) {
-    _loadChatList(_activeChatList, limit);
+    _loadAndHydrateChatList(_activeChatList, limit);
   }
 
   void _prefetchMainChats() {
@@ -202,6 +203,7 @@ class ChatListViewModel extends ChangeNotifier {
         final loaded = await _loadChatList({
           '@type': 'chatListMain',
         }, _pageSize);
+        await _hydrateChatList({'@type': 'chatListMain'});
         if (!loaded && !_loadingChatLists.contains('main')) break;
         await Future<void>.delayed(const Duration(milliseconds: 10));
       }
@@ -210,16 +212,32 @@ class ChatListViewModel extends ChangeNotifier {
   }
 
   void _loadArchive(int limit) {
-    _client
-        .query({
-          '@type': 'loadChats',
-          'chat_list': {'@type': 'chatListArchive'},
-          'limit': limit,
-        })
-        .catchError((_) => <String, dynamic>{});
+    _loadAndHydrateChatList({'@type': 'chatListArchive'}, limit);
   }
 
   void loadMore() => _loadChats(_pageSize);
+
+  Future<void> _loadAndHydrateChatList(
+    Map<String, dynamic> list,
+    int limit,
+  ) async {
+    await _loadChatList(list, limit);
+    await _hydrateChatList(list);
+  }
+
+  Future<void> _hydrateChatList(Map<String, dynamic> list) async {
+    try {
+      final res = await _client.query({
+        '@type': 'getChats',
+        'chat_list': list,
+        'limit': _hydrateLimit,
+      });
+      final ids = res.int64Array('chat_ids') ?? const <int>[];
+      for (final id in ids) {
+        _ensureChatLoaded(id);
+      }
+    } catch (_) {}
+  }
 
   // MARK: - Row actions (swipe)
 

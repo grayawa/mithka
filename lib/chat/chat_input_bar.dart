@@ -8,9 +8,11 @@
 //
 
 import 'dart:async';
+import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../components/toast.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:geolocator/geolocator.dart';
@@ -49,6 +51,16 @@ class ChatInputBar extends StatefulWidget {
 }
 
 class _ChatInputBarState extends State<ChatInputBar> {
+  static const _clipboardChannel = MethodChannel('mithka/clipboard');
+  static const _imageMimeTypes = <String>[
+    'image/png',
+    'image/jpeg',
+    'image/gif',
+    'image/webp',
+    'image/heic',
+    'image/heif',
+  ];
+
   final _controller = EmojiTextEditingController();
   final _focus = FocusNode();
   _Panel _panel = _Panel.none;
@@ -237,14 +249,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
-    // When no panel is open, lift the bar above the keyboard by its inset; when
-    // a panel IS open the keyboard is dismissed, so pin to the bottom (no gap).
-    final keyboardInset = _panel == _Panel.none
-        ? MediaQuery.of(context).viewInsets.bottom
-        : 0.0;
     return Container(
       color: c.inputBarBackground,
-      padding: EdgeInsets.only(bottom: keyboardInset),
       child: SafeArea(
         top: false,
         child: Column(
@@ -440,6 +446,33 @@ class _ChatInputBarState extends State<ChatInputBar> {
                       minLines: 1,
                       maxLines: 4,
                       style: TextStyle(fontSize: 16, color: c.textPrimary),
+                      contentInsertionConfiguration:
+                          ContentInsertionConfiguration(
+                            allowedMimeTypes: _imageMimeTypes,
+                            onContentInserted: _handleInsertedContent,
+                          ),
+                      contextMenuBuilder:
+                          (
+                            BuildContext context,
+                            EditableTextState editableTextState,
+                          ) {
+                            final items =
+                                editableTextState.contextMenuButtonItems;
+                            items.insert(
+                              0,
+                              ContextMenuButtonItem(
+                                label: '粘贴图片',
+                                onPressed: () {
+                                  ContextMenuController.removeAny();
+                                  unawaited(_pasteImageFromClipboard());
+                                },
+                              ),
+                            );
+                            return AdaptiveTextSelectionToolbar.buttonItems(
+                              anchors: editableTextState.contextMenuAnchors,
+                              buttonItems: items,
+                            );
+                          },
                       decoration: const InputDecoration(
                         hintText: '发送消息…',
                         border: InputBorder.none,
@@ -565,6 +598,68 @@ class _ChatInputBarState extends State<ChatInputBar> {
         builder: (_) => ImageEditView(sourcePath: path),
       ),
     );
+  }
+
+  void _handleInsertedContent(KeyboardInsertedContent content) {
+    unawaited(_sendInsertedImage(content));
+  }
+
+  Future<void> _sendInsertedImage(KeyboardInsertedContent content) async {
+    if (!content.mimeType.toLowerCase().startsWith('image/')) return;
+    final data = content.data;
+    if (data == null || data.isEmpty) {
+      if (mounted) showToast(context, '无法读取粘贴的图片');
+      return;
+    }
+    await _editAndSendImageBytes(data, content.mimeType);
+  }
+
+  Future<void> _pasteImageFromClipboard() async {
+    try {
+      final image = await _clipboardChannel.invokeMapMethod<String, dynamic>(
+        'readImage',
+      );
+      final data = image?['data'];
+      if (data is! Uint8List || data.isEmpty) {
+        if (mounted) showToast(context, '剪贴板没有图片');
+        return;
+      }
+      await _editAndSendImageBytes(
+        data,
+        (image?['mimeType'] as String?) ?? 'image/png',
+      );
+    } catch (_) {
+      if (mounted) showToast(context, '无法读取粘贴的图片');
+    }
+  }
+
+  Future<void> _editAndSendImageBytes(Uint8List data, String mimeType) async {
+    final dir = await getTemporaryDirectory();
+    final ext = _extensionForMime(mimeType);
+    final file = File(
+      '${dir.path}/mithka-paste-${DateTime.now().microsecondsSinceEpoch}.$ext',
+    );
+    await file.writeAsBytes(data, flush: true);
+    if (!mounted) return;
+    final edited = await _editImage(file.path);
+    if (edited != null) widget.vm.sendPhoto(edited);
+  }
+
+  String _extensionForMime(String mimeType) {
+    switch (mimeType.toLowerCase()) {
+      case 'image/jpeg':
+        return 'jpg';
+      case 'image/gif':
+        return 'gif';
+      case 'image/webp':
+        return 'webp';
+      case 'image/heic':
+        return 'heic';
+      case 'image/heif':
+        return 'heif';
+      default:
+        return 'png';
+    }
   }
 
   /// 文件: pick an arbitrary document and send it.

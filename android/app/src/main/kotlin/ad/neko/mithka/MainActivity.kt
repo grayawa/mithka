@@ -1,9 +1,12 @@
 package ad.neko.mithka
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 
 class MainActivity : FlutterActivity() {
     private var callMedia: CallMediaPlugin? = null
@@ -34,6 +37,50 @@ class MainActivity : FlutterActivity() {
                     )
                 } else {
                     result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "mithka/clipboard")
+            .setMethodCallHandler { call, result ->
+                if (call.method != "readImage") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                val clip = clipboard.primaryClip
+                if (clip == null || clip.itemCount == 0) {
+                    result.success(null)
+                    return@setMethodCallHandler
+                }
+                val uri = clip.getItemAt(0).uri
+                if (uri == null) {
+                    result.success(null)
+                    return@setMethodCallHandler
+                }
+                val mimeType = contentResolver.getType(uri)
+                    ?: clip.description?.getMimeType(0)
+                    ?: "image/png"
+                if (!mimeType.startsWith("image/")) {
+                    result.success(null)
+                    return@setMethodCallHandler
+                }
+                try {
+                    contentResolver.openInputStream(uri).use { input ->
+                        if (input == null) {
+                            result.success(null)
+                            return@setMethodCallHandler
+                        }
+                        val output = ByteArrayOutputStream()
+                        input.copyTo(output)
+                        result.success(
+                            mapOf(
+                                "mimeType" to mimeType,
+                                "data" to output.toByteArray(),
+                            ),
+                        )
+                    }
+                } catch (e: Exception) {
+                    result.error("clipboard_unavailable", e.message, null)
                 }
             }
     }

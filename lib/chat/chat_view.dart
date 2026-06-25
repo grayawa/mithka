@@ -81,6 +81,7 @@ class _ChatViewState extends State<ChatView> {
   bool _bannerDismissed = false; // "N条新消息" banner dismissed / caught up
   Timer? _bannerTimer; // auto-hides the banner a few seconds after it appears
   int? _scrollTargetId;
+  double _keyboardInset = 0;
 
   /// Gap (seconds) between messages that triggers a fresh time separator.
   static const _separatorGap = 300;
@@ -104,6 +105,29 @@ class _ChatViewState extends State<ChatView> {
     // Show the jump-to-bottom button once scrolled up from the newest message.
     final show = pos.maxScrollExtent - pos.pixels > 120;
     if (show != _showJumpDown) setState(() => _showJumpDown = show);
+  }
+
+  bool _isNearBottom([double threshold = 160]) {
+    if (!_scroll.hasClients) return true;
+    final pos = _scroll.position;
+    return pos.maxScrollExtent - pos.pixels <= threshold;
+  }
+
+  void _syncKeyboardInset(double inset) {
+    if ((_keyboardInset - inset).abs() < 0.5) return;
+    final wasNearBottom = _isNearBottom(260);
+    final opening = inset > _keyboardInset;
+    _keyboardInset = inset;
+    if ((wasNearBottom || opening) && _scrollTargetId == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scroll.hasClients) return;
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      });
+    }
   }
 
   void _animateToBottom() {
@@ -320,7 +344,14 @@ class _ChatViewState extends State<ChatView> {
       case MessageAction.forward:
         _forwardMessage(message);
       case MessageAction.save:
-        _vm.saveToFavorites(message.id);
+        try {
+          await _vm.saveToFavorites(message.id);
+          if (!mounted) return;
+          showToast(context, '已保存到 Saved Messages');
+        } catch (e) {
+          if (!mounted) return;
+          showToast(context, '保存失败：$e');
+        }
       case MessageAction.saveSticker:
         final id = message.stickerFileId ?? message.animatedSticker?.id;
         if (id != null) {
@@ -394,13 +425,20 @@ class _ChatViewState extends State<ChatView> {
       MaterialPageRoute(builder: (_) => const ChatPickerView(title: '转发到')),
     );
     if (target == null || !mounted) return;
-    _vm.forward(message.id, target.id);
-    showToast(context, '已转发到 ${target.title}');
+    try {
+      await _vm.forward(message.id, target.id);
+      if (!mounted) return;
+      showToast(context, '已转发到 ${target.title}');
+    } catch (e) {
+      if (!mounted) return;
+      showToast(context, '转发失败：$e');
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
+    _syncKeyboardInset(MediaQuery.of(context).viewInsets.bottom);
     // Not a member, joinable, and nothing to preview → a QQ-style join screen
     // (header + centered card) instead of the transcript + composer.
     if (!_vm.isMember && _vm.canJoin && _vm.messages.isEmpty) {
@@ -416,35 +454,43 @@ class _ChatViewState extends State<ChatView> {
       resizeToAvoidBottomInset: false,
       body: Stack(
         children: [
-          Column(
-            children: [
-              _header(),
-              if (_vm.pinnedMessage != null && !_vm.pinnedDismissed)
-                _pinnedBar(_vm.pinnedMessage!),
-              // Both scroll affordances float INSIDE the transcript area, so the
-              // banner sits just below the pinned bar and the jump button just
-              // above the input bar — no overlap, no magic offsets.
-              Expanded(
-                child: Stack(
-                  children: [
-                    _transcript(),
-                    if (_vm.unreadCount > 0 && !_bannerDismissed)
-                      Positioned(
-                        top: 8,
-                        right: 12,
-                        child: _newMessagesBanner(),
-                      ),
-                    if (_showJumpDown)
-                      Positioned(
-                        right: 16,
-                        bottom: 12,
-                        child: _jumpToBottomButton(),
-                      ),
-                  ],
-                ),
+          Positioned.fill(
+            child: AnimatedPadding(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+              padding: EdgeInsets.only(bottom: _keyboardInset),
+              child: Column(
+                children: [
+                  _header(),
+                  if (_vm.pinnedMessage != null && !_vm.pinnedDismissed)
+                    _pinnedBar(_vm.pinnedMessage!),
+                  // Both scroll affordances float INSIDE the transcript area, so
+                  // the banner sits just below the pinned bar and the jump
+                  // button just above the input bar — no overlap, no magic
+                  // offsets.
+                  Expanded(
+                    child: Stack(
+                      children: [
+                        _transcript(),
+                        if (_vm.unreadCount > 0 && !_bannerDismissed)
+                          Positioned(
+                            top: 8,
+                            right: 12,
+                            child: _newMessagesBanner(),
+                          ),
+                        if (_showJumpDown)
+                          Positioned(
+                            right: 16,
+                            bottom: 12,
+                            child: _jumpToBottomButton(),
+                          ),
+                      ],
+                    ),
+                  ),
+                  _composerArea(),
+                ],
               ),
-              _composerArea(),
-            ],
+            ),
           ),
           if (_actionTarget != null) _actionMenuOverlay(),
         ],

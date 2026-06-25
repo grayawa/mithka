@@ -603,31 +603,40 @@ class ChatViewModel extends ChangeNotifier {
 
   // MARK: - Message actions (long-press menu)
 
-  void forward(int messageId, int targetChatId) {
-    _client.send({
+  Future<void> forward(int messageId, int targetChatId) async {
+    await _client.query({
       '@type': 'forwardMessages',
       'chat_id': targetChatId,
       'from_chat_id': chatId,
       'message_ids': [messageId],
+      'options': {'@type': 'messageSendOptions'},
       'send_copy': false,
       'remove_caption': false,
     });
   }
 
   Future<void> saveToFavorites(int messageId) async {
-    try {
-      final me = await _client.query({'@type': 'getMe'});
-      final myId = me.int64('id');
-      if (myId == null) return;
-      _client.send({
-        '@type': 'forwardMessages',
-        'chat_id': myId,
-        'from_chat_id': chatId,
-        'message_ids': [messageId],
-        'send_copy': true,
-        'remove_caption': false,
-      });
-    } catch (_) {}
+    final me = await _client.query({'@type': 'getMe'});
+    final myId = me.int64('id');
+    if (myId == null) throw TdError({'message': 'Missing current user id'});
+    final saved = await _client.query({
+      '@type': 'createPrivateChat',
+      'user_id': myId,
+      'force': false,
+    });
+    final savedChatId = saved.int64('id');
+    if (savedChatId == null) {
+      throw TdError({'message': 'Missing Saved Messages chat id'});
+    }
+    await _client.query({
+      '@type': 'forwardMessages',
+      'chat_id': savedChatId,
+      'from_chat_id': chatId,
+      'message_ids': [messageId],
+      'options': {'@type': 'messageSendOptions'},
+      'send_copy': false,
+      'remove_caption': false,
+    });
   }
 
   void saveFavoriteSticker(int fileId) {

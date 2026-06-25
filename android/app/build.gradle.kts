@@ -24,6 +24,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     defaultConfig {
@@ -81,6 +82,7 @@ flutter {
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     // ntgcalls — a from-scratch C++ Telegram-calls engine (WebRTC + opus + libvpx
     // statically bundled inside a self-contained libntgcalls.so per ABI). This is
     // the real media transport behind the CallMediaEngine seam; CallMediaPlugin
