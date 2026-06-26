@@ -76,6 +76,15 @@ class _ChatInfoViewState extends State<ChatInfoView> {
     );
   }
 
+  void _openChatFolders() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) =>
+            ChatFolderMembershipView(chatId: widget.chatId, title: _vm.title),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -355,6 +364,8 @@ class _ChatInfoViewState extends State<ChatInfoView> {
               ),
             ),
           ),
+          const InsetDivider(leadingInset: 14),
+          _infoRow('聊天分组', _openChatFolders),
           if (!_vm.isGroup) ...[
             const InsetDivider(leadingInset: 14),
             _infoRow(
@@ -620,6 +631,296 @@ class _ChatInfoViewState extends State<ChatInfoView> {
     if (!mounted || !second) return;
     _vm.clearHistory();
     Navigator.of(context).pop();
+  }
+}
+
+class ChatFolderMembershipView extends StatefulWidget {
+  const ChatFolderMembershipView({
+    super.key,
+    required this.chatId,
+    required this.title,
+  });
+
+  final int chatId;
+  final String title;
+
+  @override
+  State<ChatFolderMembershipView> createState() =>
+      _ChatFolderMembershipViewState();
+}
+
+class _FolderMembership {
+  _FolderMembership({
+    required this.id,
+    required this.title,
+    required this.folder,
+    required this.selected,
+  });
+
+  final int id;
+  final String title;
+  Map<String, dynamic> folder;
+  bool selected;
+  bool saving = false;
+}
+
+class _ChatFolderMembershipViewState extends State<ChatFolderMembershipView> {
+  final _client = TdClient.shared;
+  final List<_FolderMembership> _folders = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final chat = await _client.query({
+        '@type': 'getChat',
+        'chat_id': widget.chatId,
+      });
+      final activeFolderIds = <int>{};
+      for (final pos
+          in chat.objects('positions') ?? const <Map<String, dynamic>>[]) {
+        final list = pos.obj('list');
+        if (list?.type == 'chatListFolder' && (pos.int64('order') ?? 0) > 0) {
+          final id = list?.integer('chat_folder_id');
+          if (id != null) activeFolderIds.add(id);
+        }
+      }
+
+      final infos = await _client.query({'@type': 'getChatFolders'});
+      final raw =
+          infos.objects('chat_folders') ??
+          infos.objects('chat_folder_infos') ??
+          const <Map<String, dynamic>>[];
+      final loaded = <_FolderMembership>[];
+      for (final info in raw) {
+        final id = info.integer('id') ?? info.integer('chat_folder_id');
+        if (id == null) continue;
+        final folder = await _client.query({
+          '@type': 'getChatFolder',
+          'chat_folder_id': id,
+        });
+        final included = _ids(folder, 'included_chat_ids');
+        final excluded = _ids(folder, 'excluded_chat_ids');
+        loaded.add(
+          _FolderMembership(
+            id: id,
+            title: _folderTitle(folder, info, id),
+            folder: folder,
+            selected:
+                included.contains(widget.chatId) ||
+                (activeFolderIds.contains(id) &&
+                    !excluded.contains(widget.chatId)),
+          ),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _folders
+          ..clear()
+          ..addAll(loaded);
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '无法加载聊天分组';
+      });
+    }
+  }
+
+  static Set<int> _ids(Map<String, dynamic> folder, String key) =>
+      (folder.int64Array(key) ?? const <int>[]).toSet();
+
+  static String _folderTitle(
+    Map<String, dynamic> folder,
+    Map<String, dynamic> info,
+    int id,
+  ) {
+    final title =
+        folder.str('title') ??
+        folder.obj('title')?.str('text') ??
+        folder.obj('name')?.obj('text')?.str('text') ??
+        info.obj('name')?.obj('text')?.str('text') ??
+        info.obj('title')?.str('text') ??
+        info.str('title') ??
+        info.str('name');
+    return (title == null || title.isEmpty) ? '分组 $id' : title;
+  }
+
+  Future<void> _toggle(_FolderMembership item, bool value) async {
+    if (item.saving || item.selected == value) return;
+    setState(() {
+      item.selected = value;
+      item.saving = true;
+    });
+
+    final previous = Map<String, dynamic>.from(item.folder);
+    final updated = _folderWithMembership(item.folder, value);
+    try {
+      await _client.query({
+        '@type': 'editChatFolder',
+        'chat_folder_id': item.id,
+        'folder': updated,
+      });
+      if (!mounted) return;
+      setState(() {
+        item.folder = updated;
+        item.saving = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        item.folder = previous;
+        item.selected = !value;
+        item.saving = false;
+      });
+    }
+  }
+
+  Map<String, dynamic> _folderWithMembership(
+    Map<String, dynamic> folder,
+    bool include,
+  ) {
+    final included = _ids(folder, 'included_chat_ids');
+    final excluded = _ids(folder, 'excluded_chat_ids');
+    if (include) {
+      included.add(widget.chatId);
+      excluded.remove(widget.chatId);
+    } else {
+      included.remove(widget.chatId);
+      excluded.add(widget.chatId);
+    }
+
+    return {
+      '@type': 'chatFolder',
+      'title':
+          folder.str('title') ??
+          _folderTitle(folder, const <String, dynamic>{}, 0),
+      if (folder.obj('icon') != null) 'icon': folder.obj('icon'),
+      'is_shareable': folder.boolean('is_shareable') ?? false,
+      'pinned_chat_ids': folder.int64Array('pinned_chat_ids') ?? const <int>[],
+      'included_chat_ids': included.toList()..sort(),
+      'excluded_chat_ids': excluded.toList()..sort(),
+      'exclude_muted': folder.boolean('exclude_muted') ?? false,
+      'exclude_read': folder.boolean('exclude_read') ?? false,
+      'exclude_archived': folder.boolean('exclude_archived') ?? false,
+      'include_contacts': folder.boolean('include_contacts') ?? false,
+      'include_non_contacts': folder.boolean('include_non_contacts') ?? false,
+      'include_bots': folder.boolean('include_bots') ?? false,
+      'include_groups': folder.boolean('include_groups') ?? false,
+      'include_channels': folder.boolean('include_channels') ?? false,
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(title: '聊天分组', onBack: () => Navigator.of(context).pop()),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator.adaptive())
+                : _body(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _body() {
+    final c = context.colors;
+    if (_error != null) {
+      return Center(
+        child: Text(_error!, style: TextStyle(color: c.textSecondary)),
+      );
+    }
+    if (_folders.isEmpty) {
+      return Center(
+        child: Text('暂无聊天分组', style: TextStyle(color: c.textSecondary)),
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 24),
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: c.card,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              for (var i = 0; i < _folders.length; i++) ...[
+                _folderRow(_folders[i]),
+                if (i < _folders.length - 1)
+                  const InsetDivider(leadingInset: 50),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          child: Text(
+            '关闭某个分组会将此聊天加入该分组的排除列表，用于覆盖自动分组规则。',
+            style: TextStyle(fontSize: 13, color: c.textTertiary),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _folderRow(_FolderMembership item) {
+    final c = context.colors;
+    return SizedBox(
+      height: 56,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: Row(
+          children: [
+            Icon(sfIcon('folder'), size: 22, color: AppTheme.brand),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                item.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 16, color: c.textPrimary),
+              ),
+            ),
+            if (item.saving)
+              const SizedBox(
+                width: 28,
+                height: 28,
+                child: Padding(
+                  padding: EdgeInsets.all(5),
+                  child: CircularProgressIndicator.adaptive(strokeWidth: 2),
+                ),
+              )
+            else
+              CupertinoSwitch(
+                value: item.selected,
+                activeTrackColor: AppTheme.brand,
+                onChanged: (value) => _toggle(item, value),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

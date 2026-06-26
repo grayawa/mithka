@@ -10,6 +10,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/rendering.dart';
 import '../components/toast.dart';
 import 'package:flutter/services.dart';
@@ -86,14 +87,25 @@ class _ChatViewState extends State<ChatView> {
   bool _bannerDismissed = false; // "N条新消息" banner dismissed / caught up
   Timer? _bannerTimer; // auto-hides the banner a few seconds after it appears
   int? _scrollTargetId;
+  int? _lastNewestMessageId;
+  int _liveNewMessageCount = 0;
   double _keyboardInset = 0;
   bool _shortTranscriptFillScheduled = false;
   bool _isFillingShortTranscript = false;
   bool _autoTranslateScheduled = false;
   bool _autoTranslateRunning = false;
+  bool _loadingLatestFromAnchor = false;
   String _autoTranslateConfigKey = '';
   final Set<int> _autoTranslateInFlight = {};
   final Set<int> _autoTranslateFailed = {};
+  final Set<int> _selectedMessageIds = {};
+  int? _selectionAnchorId;
+  bool _selectionScrollingUp = false;
+  double _lastScrollPixels = 0;
+  double _backSwipeDx = 0;
+  double _backSwipeDy = 0;
+  bool _backSwipePopping = false;
+  VelocityTracker? _backSwipeVelocity;
 
   /// Gap (seconds) between messages that triggers a fresh time separator.
   static const _separatorGap = 300;
@@ -113,9 +125,25 @@ class _ChatViewState extends State<ChatView> {
   void _onScroll() {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
+    final scrollingUp = pos.pixels < _lastScrollPixels;
+    _lastScrollPixels = pos.pixels;
+    if (_selectionAnchorId != null && scrollingUp != _selectionScrollingUp) {
+      setState(() => _selectionScrollingUp = scrollingUp);
+    }
     if (pos.pixels < 500) unawaited(_vm.loadOlder());
+    if (_vm.anchoredHistory &&
+        pos.userScrollDirection == ScrollDirection.reverse &&
+        pos.maxScrollExtent - pos.pixels < 36) {
+      unawaited(_returnToLatest());
+    }
+    if (_liveNewMessageCount > 0 && _isNearBottom(80)) {
+      setState(() {
+        _liveNewMessageCount = 0;
+        _bannerDismissed = true;
+      });
+    }
     // Show the jump-to-bottom button once scrolled up from the newest message.
-    final show = pos.maxScrollExtent - pos.pixels > 120;
+    final show = _vm.anchoredHistory || pos.maxScrollExtent - pos.pixels > 120;
     if (show != _showJumpDown) setState(() => _showJumpDown = show);
   }
 
@@ -151,10 +179,42 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
+  Future<void> _returnToLatest() async {
+    if (_loadingLatestFromAnchor) return;
+    if (!_vm.anchoredHistory) {
+      _scrollTargetId = null;
+      if (_liveNewMessageCount > 0) {
+        setState(() {
+          _liveNewMessageCount = 0;
+          _bannerDismissed = true;
+        });
+      }
+      _animateToBottom();
+      return;
+    }
+    _loadingLatestFromAnchor = true;
+    _scrollTargetId = null;
+    try {
+      final ok = await _vm.loadLatestHistory();
+      if (!mounted || !ok) return;
+      _liveNewMessageCount = 0;
+      _bannerDismissed = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _animateToBottom();
+      });
+    } finally {
+      _loadingLatestFromAnchor = false;
+    }
+  }
+
   /// Jump to the first unread incoming message (where the "以下为新消息" divider
   /// sits); fall back to the bottom if none is loaded.
   void _jumpToFirstUnread() {
-    setState(() => _bannerDismissed = true);
+    setState(() {
+      _liveNewMessageCount = 0;
+      _bannerDismissed = true;
+    });
     final i = _vm.messages.indexWhere(
       (m) => !m.isOutgoing && !m.isService && m.id > _vm.lastReadInboxId,
     );
@@ -174,12 +234,36 @@ class _ChatViewState extends State<ChatView> {
   void _onModel() {
     if (!mounted) return;
     if (_vm.messages.length != _lastCount) {
+      final wasNearBottom = _isNearBottom(180);
+      final previousNewestId = _lastNewestMessageId;
+      final newest = _vm.messages.isEmpty ? null : _vm.messages.last;
+      final appendedNewest =
+          newest != null &&
+          newest.id != previousNewestId &&
+          (previousNewestId == null || newest.id > previousNewestId);
       final restore = _vm.consumeRestoreTop();
       _lastCount = _vm.messages.length;
-      // Keep pinned to the bottom while history streams in; the one-time entry
-      // positioning below repositions to the first unread once it's all loaded.
-      if (restore == null && _scrollTargetId == null && !_vm.anchoredHistory) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+      _lastNewestMessageId = newest?.id ?? _lastNewestMessageId;
+      final shouldAutoScroll =
+          _didInitialScroll &&
+          restore == null &&
+          _scrollTargetId == null &&
+          !_vm.anchoredHistory &&
+          appendedNewest &&
+          (wasNearBottom || newest.isOutgoing);
+      if (shouldAutoScroll) {
+        _liveNewMessageCount = 0;
+        WidgetsBinding.instance.addPostFrameCallback((_) => _animateToBottom());
+      } else if (_didInitialScroll &&
+          restore == null &&
+          appendedNewest &&
+          !newest.isOutgoing &&
+          !newest.isService &&
+          !wasNearBottom) {
+        _liveNewMessageCount++;
+        _bannerDismissed = false;
+        _bannerTimer?.cancel();
+        _bannerTimer = null;
       }
     }
     final target = _vm.consumePendingScrollToId();
@@ -203,7 +287,10 @@ class _ChatViewState extends State<ChatView> {
     }
     _scheduleAutoTranslate();
     // The "N条新消息" banner shows on entry, then auto-hides after a few seconds.
-    if (_vm.unreadCount > 0 && _bannerTimer == null && !_bannerDismissed) {
+    if (_vm.unreadCount > 0 &&
+        _liveNewMessageCount == 0 &&
+        _bannerTimer == null &&
+        !_bannerDismissed) {
       _bannerTimer = Timer(const Duration(seconds: 6), () {
         if (mounted) setState(() => _bannerDismissed = true);
       });
@@ -215,16 +302,21 @@ class _ChatViewState extends State<ChatView> {
     (m) => !m.isOutgoing && !m.isService && m.id > _vm.lastReadInboxId,
   );
 
-  /// One-time positioning when a chat opens: land on the first unread message
-  /// (the "以下为新消息" divider near the top), or on the latest message when
-  /// caught up. Because the list is lazily built, the divider's context may not
-  /// exist yet — jump approximately first to build it, then snap precisely.
+  /// One-time positioning when a chat opens: either land on the latest message
+  /// per appearance settings, or on the first unread message (the "以下为新消息"
+  /// divider near the top). Because the list is lazily built, the divider's
+  /// context may not exist yet — jump approximately first to build it, then snap
+  /// precisely.
   void _initialScroll() {
     if (!_scroll.hasClients) return;
     final target = widget.initialMessageId;
     if (target != null) {
       _scrollTargetId = target;
       _ensureMessageVisible(target);
+      return;
+    }
+    if (context.read<ThemeController>().openChatsAtLatest) {
+      _scrollToBottom();
       return;
     }
     final i = _firstUnreadIndex();
@@ -296,6 +388,10 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _positionAfterShortFill() {
+    if (context.read<ThemeController>().openChatsAtLatest) {
+      _scrollToBottom();
+      return;
+    }
     final i = _firstUnreadIndex();
     final boundaryLoaded =
         _vm.messages.isNotEmpty && _vm.messages.first.id <= _vm.lastReadInboxId;
@@ -307,6 +403,170 @@ class _ChatViewState extends State<ChatView> {
       }
     }
     _scrollToBottom();
+  }
+
+  bool get _canBackSwipe => !_isSelecting && _actionTarget == null;
+
+  void _onBackSwipePointerDown(PointerDownEvent event) {
+    if (!_canBackSwipe) return;
+    _backSwipeDx = 0;
+    _backSwipeDy = 0;
+    _backSwipeVelocity = VelocityTracker.withKind(event.kind)
+      ..addPosition(event.timeStamp, event.position);
+  }
+
+  void _onBackSwipePointerMove(PointerMoveEvent event) {
+    final tracker = _backSwipeVelocity;
+    if (tracker == null || !_canBackSwipe) return;
+    _backSwipeDx += event.delta.dx;
+    _backSwipeDy += event.delta.dy;
+    tracker.addPosition(event.timeStamp, event.position);
+  }
+
+  void _onBackSwipePointerEnd(PointerEvent event) {
+    final tracker = _backSwipeVelocity;
+    if (tracker == null) return;
+    final velocity = tracker.getVelocity().pixelsPerSecond.dx;
+    final horizontal = _backSwipeDx.abs() > _backSwipeDy.abs() * 1.65;
+    final shouldPop =
+        _canBackSwipe &&
+        horizontal &&
+        _backSwipeDx > 72 &&
+        (velocity > 520 || _backSwipeDx > 118);
+    _backSwipeVelocity = null;
+    _backSwipeDx = 0;
+    _backSwipeDy = 0;
+    if (shouldPop) unawaited(_popFromBackSwipe());
+  }
+
+  Future<void> _popFromBackSwipe() async {
+    if (_backSwipePopping || !mounted) return;
+    _backSwipePopping = true;
+    try {
+      await Navigator.of(context).maybePop();
+    } finally {
+      _backSwipePopping = false;
+    }
+  }
+
+  bool get _isSelecting => _selectionAnchorId != null;
+
+  void _enterSelection(ChatMessage message) {
+    setState(() {
+      _actionTarget = null;
+      _actionRect = null;
+      _reactionExpanded = false;
+      _selectionAnchorId = message.id;
+      _selectedMessageIds
+        ..clear()
+        ..add(message.id);
+      _selectionScrollingUp = false;
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selectionAnchorId = null;
+      _selectedMessageIds.clear();
+    });
+  }
+
+  void _toggleSelection(Iterable<ChatMessage> messages) {
+    final ids = messages.where((m) => !m.isService).map((m) => m.id).toList();
+    if (ids.isEmpty) return;
+    setState(() {
+      final allSelected = ids.every(_selectedMessageIds.contains);
+      if (allSelected) {
+        _selectedMessageIds.removeAll(ids);
+      } else {
+        _selectedMessageIds.addAll(ids);
+      }
+      if (_selectedMessageIds.isEmpty) _selectionAnchorId = null;
+    });
+  }
+
+  List<int> _orderedSelectedIds() => _vm.messages
+      .where((m) => _selectedMessageIds.contains(m.id))
+      .map((m) => m.id)
+      .toList();
+
+  int _approxVisibleMessageIndex({required bool topEdge}) {
+    if (!_scroll.hasClients || _vm.messages.isEmpty) return 0;
+    final pos = _scroll.position;
+    final max = math.max(pos.maxScrollExtent, 1.0);
+    final viewport = math.max(pos.viewportDimension, 1.0);
+    final pixels = topEdge
+        ? pos.pixels
+        : math.min(pos.maxScrollExtent, pos.pixels + viewport);
+    final frac = (pixels / max).clamp(0.0, 1.0);
+    return (frac * (_vm.messages.length - 1)).round().clamp(
+      0,
+      _vm.messages.length - 1,
+    );
+  }
+
+  void _selectToVisibleEdge() {
+    final anchorId = _selectionAnchorId;
+    if (anchorId == null || _vm.messages.isEmpty) return;
+    final anchorIndex = _vm.messages.indexWhere((m) => m.id == anchorId);
+    if (anchorIndex < 0) return;
+    final edgeIndex = _approxVisibleMessageIndex(
+      topEdge: _selectionScrollingUp,
+    );
+    final start = math.min(anchorIndex, edgeIndex);
+    final end = math.max(anchorIndex, edgeIndex);
+    setState(() {
+      for (final message in _vm.messages.getRange(start, end + 1)) {
+        if (!message.isService) _selectedMessageIds.add(message.id);
+      }
+    });
+  }
+
+  Future<void> _forwardSelected() async {
+    final ids = _orderedSelectedIds();
+    if (ids.isEmpty) return;
+    final target = await Navigator.of(context).push<ChatSummary>(
+      MaterialPageRoute(builder: (_) => const ChatPickerView(title: '转发到')),
+    );
+    if (target == null || !mounted) return;
+    try {
+      await _vm.forwardMany(ids, target.id);
+      if (!mounted) return;
+      showToast(context, '已转发 ${ids.length} 条消息');
+      _exitSelection();
+    } catch (e) {
+      if (!mounted) return;
+      showToast(context, '转发失败：$e');
+    }
+  }
+
+  Future<void> _saveSelected() async {
+    final ids = _orderedSelectedIds();
+    if (ids.isEmpty) return;
+    try {
+      await _vm.saveToFavoritesMany(ids);
+      if (!mounted) return;
+      showToast(context, '已保存 ${ids.length} 条消息');
+      _exitSelection();
+    } catch (e) {
+      if (!mounted) return;
+      showToast(context, '保存失败：$e');
+    }
+  }
+
+  Future<void> _deleteSelected() async {
+    final ids = _orderedSelectedIds();
+    if (ids.isEmpty) return;
+    final confirmed = await confirmDialog(
+      context,
+      title: '删除消息？',
+      message: '确定要删除选中的 ${ids.length} 条消息吗？',
+      confirmText: '删除',
+      destructive: true,
+    );
+    if (!mounted || !confirmed) return;
+    _vm.deleteMessages(ids);
+    _exitSelection();
   }
 
   void _scheduleAutoTranslate() {
@@ -539,6 +799,26 @@ class _ChatViewState extends State<ChatView> {
         _vm.setReply(message);
       case MessageAction.forward:
         _forwardMessage(message);
+      case MessageAction.multiSelect:
+        _enterSelection(message);
+      case MessageAction.pinTodo:
+        try {
+          await _vm.pinTodo(message);
+          if (!mounted) return;
+          showToast(context, '已设为群待办');
+        } catch (e) {
+          if (!mounted) return;
+          showToast(context, '设置失败：$e');
+        }
+      case MessageAction.unpinTodo:
+        try {
+          await _vm.unpinTodo(message);
+          if (!mounted) return;
+          showToast(context, '已撤回群待办');
+        } catch (e) {
+          if (!mounted) return;
+          showToast(context, '撤回失败：$e');
+        }
       case MessageAction.save:
         try {
           await _vm.saveToFavorites(message.id);
@@ -668,14 +948,18 @@ class _ChatViewState extends State<ChatView> {
   }
 
   void _openSenderProfile(ChatMessage m) {
-    final uid = _vm.isGroup ? m.senderId : _vm.peerUserId;
+    final uid = m.isOutgoing
+        ? _vm.meId
+        : (_vm.isGroup ? m.senderId : _vm.peerUserId);
     if (uid == null || uid <= 0) {
       return; // channels post as the chat, not a user
     }
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            ProfileDetailView(userId: uid, name: m.senderName ?? _vm.peerTitle),
+        builder: (_) => ProfileDetailView(
+          userId: uid,
+          name: m.isOutgoing ? _vm.meName : (m.senderName ?? _vm.peerTitle),
+        ),
       ),
     );
   }
@@ -720,53 +1004,65 @@ class _ChatViewState extends State<ChatView> {
         body: _joinScreenBody(),
       );
     }
+    final showPinnedTodo =
+        !_isSelecting && _vm.pinnedMessage != null && !_vm.pinnedDismissed;
     return Scaffold(
       backgroundColor: c.chatBackground,
       // The input bar manages the keyboard inset itself (see ChatInputBar), so
       // an open emoji/+ panel sits flush instead of leaving a keyboard-sized gap.
       resizeToAvoidBottomInset: false,
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: AnimatedPadding(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeOut,
-              padding: EdgeInsets.only(bottom: _keyboardInset),
-              child: Column(
-                children: [
-                  _header(),
-                  if (_vm.pinnedMessage != null && !_vm.pinnedDismissed)
-                    _pinnedBar(_vm.pinnedMessage!),
-                  // Both scroll affordances float INSIDE the transcript area, so
-                  // the banner sits just below the pinned bar and the jump
-                  // button just above the input bar — no overlap, no magic
-                  // offsets.
-                  Expanded(
-                    child: Stack(
-                      children: [
-                        _transcript(),
-                        if (_vm.unreadCount > 0 && !_bannerDismissed)
-                          Positioned(
-                            top: 8,
-                            right: 12,
-                            child: _newMessagesBanner(),
-                          ),
-                        if (_showJumpDown)
-                          Positioned(
-                            right: 16,
-                            bottom: 12,
-                            child: _jumpToBottomButton(),
-                          ),
-                      ],
+      body: Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _onBackSwipePointerDown,
+        onPointerMove: _onBackSwipePointerMove,
+        onPointerUp: _onBackSwipePointerEnd,
+        onPointerCancel: _onBackSwipePointerEnd,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: AnimatedPadding(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.only(bottom: _keyboardInset),
+                child: Column(
+                  children: [
+                    _isSelecting ? _selectionHeader() : _header(),
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          _transcript(),
+                          if (showPinnedTodo)
+                            Positioned(
+                              top: 12,
+                              left: 12,
+                              right: 12,
+                              child: _pinnedBar(_vm.pinnedMessage!),
+                            ),
+                          if (_isSelecting) _selectToHereButton(),
+                          if ((_vm.unreadCount + _liveNewMessageCount) > 0 &&
+                              !_bannerDismissed)
+                            Positioned(
+                              top: showPinnedTodo ? 72 : 8,
+                              right: 12,
+                              child: _newMessagesBanner(),
+                            ),
+                          if (_showJumpDown)
+                            Positioned(
+                              right: 16,
+                              bottom: 12,
+                              child: _jumpToBottomButton(),
+                            ),
+                        ],
+                      ),
                     ),
-                  ),
-                  _composerArea(),
-                ],
+                    _isSelecting ? _selectionActionBar() : _composerArea(),
+                  ],
+                ),
               ),
             ),
-          ),
-          if (_actionTarget != null) _actionMenuOverlay(),
-        ],
+            if (_actionTarget != null && !_isSelecting) _actionMenuOverlay(),
+          ],
+        ),
       ),
     );
   }
@@ -777,7 +1073,7 @@ class _ChatViewState extends State<ChatView> {
     final c = context.colors;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: _animateToBottom,
+      onTap: _returnToLatest,
       child: Container(
         width: 40,
         height: 40,
@@ -801,6 +1097,7 @@ class _ChatViewState extends State<ChatView> {
   /// Top-right "N条新消息" pill; tap jumps up to the first unread message.
   Widget _newMessagesBanner() {
     final c = context.colors;
+    final count = _vm.unreadCount + _liveNewMessageCount;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: _jumpToFirstUnread,
@@ -824,7 +1121,7 @@ class _ChatViewState extends State<ChatView> {
             Icon(sfIcon('arrow.up'), size: 14, color: AppTheme.brand),
             const SizedBox(width: 5),
             Text(
-              '${_vm.unreadCount}条新消息',
+              '$count条新消息',
               style: TextStyle(
                 fontSize: 13,
                 color: c.textPrimary,
@@ -1100,52 +1397,214 @@ class _ChatViewState extends State<ChatView> {
     );
   }
 
+  Widget _selectionHeader() {
+    final c = context.colors;
+    final count = _selectedMessageIds.length;
+    return Container(
+      padding: EdgeInsets.only(top: MediaQuery.of(context).padding.top),
+      decoration: BoxDecoration(
+        color: c.navBar,
+        border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
+      ),
+      child: SizedBox(
+        height: 48,
+        child: Row(
+          children: [
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _exitSelection,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  '取消',
+                  style: TextStyle(fontSize: 16, color: c.textPrimary),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Text(
+                '已选择 $count 条消息',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: c.textPrimary,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Icon(
+                sfIcon('magnifyingglass'),
+                size: 22,
+                color: c.textPrimary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _selectToHereButton() {
+    final c = context.colors;
+    final align = _selectionScrollingUp
+        ? Alignment.topLeft
+        : Alignment.bottomLeft;
+    final margin = EdgeInsets.only(
+      left: 12,
+      top: _selectionScrollingUp ? 12 : 0,
+      bottom: _selectionScrollingUp ? 0 : 12,
+    );
+    return Align(
+      alignment: align,
+      child: Padding(
+        padding: margin,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: _selectToVisibleEdge,
+          child: Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              color: c.navBar,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 12,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  _selectionScrollingUp
+                      ? sfIcon('arrow.up')
+                      : sfIcon('chevron.down'),
+                  size: 18,
+                  color: AppTheme.brand,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  '选择到这里',
+                  style: TextStyle(fontSize: 15, color: AppTheme.brand),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _selectionActionBar() {
+    final c = context.colors;
+    final enabled = _selectedMessageIds.isNotEmpty;
+    final color = enabled ? c.textPrimary : c.textTertiary;
+    Widget button(String icon, VoidCallback onTap) => GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: enabled ? onTap : null,
+      child: SizedBox(
+        width: 58,
+        height: 52,
+        child: Icon(sfIcon(icon), size: 26, color: color),
+      ),
+    );
+    return Container(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom),
+      decoration: BoxDecoration(
+        color: c.navBar,
+        border: Border(top: BorderSide(color: c.divider, width: 0.5)),
+      ),
+      child: SizedBox(
+        height: 58,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            button('arrowshape.turn.up.right', _forwardSelected),
+            button('star', _saveSelected),
+            button('trash', _deleteSelected),
+            button('ellipsis', () => showToast(context, '暂未支持更多操作')),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _pinnedBar(ChatMessage pinned) {
     final c = context.colors;
+    final text = pinned.text.trim().isEmpty
+        ? '[消息]'
+        : pinned.text.replaceAll('\n', ' ');
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => _scrollToMessage(pinned.id),
       child: Container(
-        height: 44,
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 18),
         decoration: BoxDecoration(
-          color: c.navBar,
-          border: Border(bottom: BorderSide(color: c.divider, width: 0.5)),
+          color: c.card.withValues(alpha: 0.86),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: c.divider.withValues(alpha: 0.55),
+            width: 0.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 14),
         child: Row(
           children: [
-            Container(width: 3, height: 28, color: AppTheme.brand),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '置顶消息',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.brand,
-                    ),
-                  ),
-                  Text(
-                    pinned.text.isEmpty
-                        ? '[消息]'
-                        : pinned.text.replaceAll('\n', ' '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, color: c.textSecondary),
-                  ),
-                ],
+            Container(
+              width: 22,
+              height: 22,
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFFFFB300), width: 2),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Icon(
+                sfIcon('checkmark'),
+                size: 15,
+                color: const Color(0xFFFFB300),
               ),
             ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text.rich(
+                TextSpan(
+                  children: [
+                    const TextSpan(
+                      text: '群待办',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    TextSpan(
+                      text: ' | $text',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w400,
+                        color: c.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 16, color: c.textPrimary),
+              ),
+            ),
+            const SizedBox(width: 12),
             GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _vm.dismissPinned,
               child: Padding(
-                padding: const EdgeInsets.only(left: 8),
-                child: Icon(sfIcon('xmark'), size: 16, color: c.textSecondary),
+                padding: const EdgeInsets.all(8),
+                child: Icon(sfIcon('xmark'), size: 20, color: c.textTertiary),
               ),
             ),
           ],
@@ -1177,6 +1636,9 @@ class _ChatViewState extends State<ChatView> {
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
+        if (mounted && _scrollTargetId == messageId) {
+          setState(() => _scrollTargetId = null);
+        }
         return;
       }
       if (!_scroll.hasClients) return;
@@ -1190,6 +1652,9 @@ class _ChatViewState extends State<ChatView> {
       }
       await Future<void>.delayed(const Duration(milliseconds: 120));
       if (!mounted) return;
+    }
+    if (mounted && _scrollTargetId == messageId) {
+      setState(() => _scrollTargetId = null);
     }
   }
 
@@ -1214,7 +1679,7 @@ class _ChatViewState extends State<ChatView> {
           final isPinned = entry.messages.any(
             (m) => m.id == _vm.pinnedMessage?.id,
           );
-          return Column(
+          final content = Column(
             key: isTarget
                 ? _targetKey
                 : isPinned
@@ -1229,41 +1694,84 @@ class _ChatViewState extends State<ChatView> {
               if (message.isService)
                 SystemBanner(text: message.text)
               else if (entry.isImageGroup)
-                _imageGroupBubble(entry.messages)
+                _selectionEntry(entry, _imageGroupBubble(entry.messages))
               else
-                MessageBubble(
-                  message: message,
-                  peerTitle: _vm.peerTitle,
-                  peerPhoto: _vm.peerPhoto,
-                  isGroup: _vm.isGroup,
-                  meName: _vm.meName,
-                  mePhoto: _vm.mePhoto,
-                  showRepeat: _isRepeatTail(messageIndex),
-                  onRepeat: () => _vm.repeatMessage(message),
-                  onLongPress: (m, rect) => setState(() {
-                    _actionTarget = m;
-                    _actionRect = rect;
-                    _reactionExpanded = false;
-                    _reactionTab = 'standard';
-                  }),
-                  onReply: (m) => _vm.setReply(m),
-                  onAvatarTap: _openSenderProfile,
-                  onAvatarLongPress: (m) {
-                    if (_vm.isGroup && (m.senderName?.isNotEmpty ?? false)) {
-                      _vm.insertMention(m);
-                    }
-                  },
-                  onOpenReply: (messageId) => _scrollToMessage(messageId),
-                  onOpenImage: _openImage,
-                  onPlayVideo: _playVideo,
-                  onButtonTap: _pressMessageButton,
-                  isRead: _vm.isRead(message),
-                  onToggleReaction: (r) => _vm.toggleReaction(message, r),
-                  onRedial: _startCall,
+                _selectionEntry(
+                  entry,
+                  MessageBubble(
+                    message: message,
+                    peerTitle: _vm.peerTitle,
+                    peerPhoto: _vm.peerPhoto,
+                    isGroup: _vm.isGroup,
+                    meName: _vm.meName,
+                    mePhoto: _vm.mePhoto,
+                    showRepeat: _isRepeatTail(messageIndex),
+                    onRepeat: () => _vm.repeatMessage(message),
+                    onLongPress: _isSelecting
+                        ? null
+                        : (m, rect) => setState(() {
+                            _actionTarget = m;
+                            _actionRect = rect;
+                            _reactionExpanded = false;
+                            _reactionTab = 'standard';
+                          }),
+                    onReply: (m) => _vm.setReply(m),
+                    onAvatarTap: _openSenderProfile,
+                    onAvatarLongPress: (m) {
+                      if (_vm.isGroup && (m.senderName?.isNotEmpty ?? false)) {
+                        _vm.insertMention(m);
+                      }
+                    },
+                    onOpenReply: (messageId) => _scrollToMessage(messageId),
+                    onOpenImage: _openImage,
+                    onPlayVideo: _playVideo,
+                    onButtonTap: _pressMessageButton,
+                    isRead: _vm.isRead(message),
+                    onToggleReaction: (r) => _vm.toggleReaction(message, r),
+                    onRedial: _startCall,
+                  ),
                 ),
             ],
           );
+          return content;
         },
+      ),
+    );
+  }
+
+  Widget _selectionEntry(_TranscriptEntry entry, Widget child) {
+    if (!_isSelecting) return child;
+    final selectable = entry.messages.where((m) => !m.isService).toList();
+    if (selectable.isEmpty) return child;
+    final selected = selectable.every(
+      (m) => _selectedMessageIds.contains(m.id),
+    );
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _toggleSelection(selectable),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const SizedBox(width: 16),
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: selected ? AppTheme.brand : Colors.transparent,
+              border: Border.all(
+                color: selected ? AppTheme.brand : c.textTertiary,
+                width: selected ? 0 : 1.4,
+              ),
+            ),
+            child: selected
+                ? const Icon(Icons.check, size: 17, color: Colors.white)
+                : null,
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: IgnorePointer(child: child)),
+        ],
       ),
     );
   }
@@ -1339,7 +1847,7 @@ class _ChatViewState extends State<ChatView> {
 
     Widget avatar() => GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: outgoing ? null : () => _openSenderProfile(first),
+      onTap: () => _openSenderProfile(first),
       onLongPress: outgoing
           ? null
           : () {
@@ -1626,6 +2134,7 @@ class _ChatViewState extends State<ChatView> {
               alignment: align,
               child: MessageActionMenu(
                 message: _actionTarget!,
+                isPinned: _vm.pinnedMessage?.id == _actionTarget!.id,
                 onSelect: (action) => _perform(action, _actionTarget!),
               ),
             ),

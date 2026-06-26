@@ -19,8 +19,11 @@ enum MessageAction {
   copy('doc', '复制'),
   edit('pencil', '编辑'),
   translate('character.book.closed', '翻译'),
-  reply('arrowshape.turn.up.left', '引用'),
-  forward('arrowshape.turn.up.left', '转发'),
+  reply('quote.bubble', '引用'),
+  forward('arrowshape.turn.up.right', '转发'),
+  multiSelect('checkmark.circle', '多选'),
+  pinTodo('pin.fill', '设为待办'),
+  unpinTodo('pin.fill', '撤回待办'),
   save('star.fill', '收藏'),
   saveSticker('plus.circle', '添加'),
   viewStickerSet('square.grid.2x2', '表情包'),
@@ -37,9 +40,11 @@ class MessageActionMenu extends StatelessWidget {
   const MessageActionMenu({
     super.key,
     required this.message,
+    required this.isPinned,
     required this.onSelect,
   });
   final ChatMessage message;
+  final bool isPinned;
   final ValueChanged<MessageAction> onSelect;
 
   static const _surface = Color(0xFF2C2C2E);
@@ -66,6 +71,8 @@ class MessageActionMenu extends StatelessWidget {
     }
     result.add(MessageAction.reply);
     result.add(MessageAction.forward);
+    result.add(MessageAction.multiSelect);
+    result.add(isPinned ? MessageAction.unpinTodo : MessageAction.pinTodo);
     result.add(MessageAction.save);
     // 添加 — add any sticker (tgs / webm / webp) to favorites.
     // Non-premium users can't add custom emoji / emoji sets, so hide 添加 + 表情包

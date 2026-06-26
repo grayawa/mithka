@@ -86,6 +86,7 @@ class ChatViewModel extends ChangeNotifier {
   int memberCount = 0;
   int? peerUserId; // private chat → call target
   String meName = '我';
+  int? meId;
   TdFileRef? mePhoto;
   String draft = '';
   final List<_DraftMention> _draftMentions = [];
@@ -199,6 +200,7 @@ class ChatViewModel extends ChangeNotifier {
   Future<void> _loadMe() async {
     try {
       final me = await _client.query({'@type': 'getMe'});
+      meId = me.int64('id');
       final name = TDParse.userName(me);
       if (name.isNotEmpty) meName = name;
       mePhoto = TDParse.smallPhoto(me.obj('profile_photo'));
@@ -752,11 +754,16 @@ class ChatViewModel extends ChangeNotifier {
   // MARK: - Message actions (long-press menu)
 
   Future<void> forward(int messageId, int targetChatId) async {
+    await forwardMany([messageId], targetChatId);
+  }
+
+  Future<void> forwardMany(List<int> messageIds, int targetChatId) async {
+    if (messageIds.isEmpty) return;
     await _client.query({
       '@type': 'forwardMessages',
       'chat_id': targetChatId,
       'from_chat_id': chatId,
-      'message_ids': [messageId],
+      'message_ids': messageIds,
       'options': {'@type': 'messageSendOptions'},
       'send_copy': false,
       'remove_caption': false,
@@ -764,6 +771,11 @@ class ChatViewModel extends ChangeNotifier {
   }
 
   Future<void> saveToFavorites(int messageId) async {
+    await saveToFavoritesMany([messageId]);
+  }
+
+  Future<void> saveToFavoritesMany(List<int> messageIds) async {
+    if (messageIds.isEmpty) return;
     final me = await _client.query({'@type': 'getMe'});
     final myId = me.int64('id');
     if (myId == null) throw TdError({'message': 'Missing current user id'});
@@ -780,7 +792,7 @@ class ChatViewModel extends ChangeNotifier {
       '@type': 'forwardMessages',
       'chat_id': savedChatId,
       'from_chat_id': chatId,
-      'message_ids': [messageId],
+      'message_ids': messageIds,
       'options': {'@type': 'messageSendOptions'},
       'send_copy': false,
       'remove_caption': false,
@@ -795,13 +807,18 @@ class ChatViewModel extends ChangeNotifier {
   }
 
   void deleteMessage(int id) {
+    deleteMessages([id]);
+  }
+
+  void deleteMessages(List<int> ids) {
+    if (ids.isEmpty) return;
     _client.send({
       '@type': 'deleteMessages',
       'chat_id': chatId,
-      'message_ids': [id],
+      'message_ids': ids,
       'revoke': true,
     });
-    _removeMessages([id]);
+    _removeMessages(ids);
   }
 
   void editMessageText(int id, String text) {
@@ -834,6 +851,21 @@ class ChatViewModel extends ChangeNotifier {
     } finally {
       _isLoadingOlder = false;
     }
+  }
+
+  Future<bool> loadLatestHistory() async {
+    anchoredHistory = false;
+    _pendingScrollToId = null;
+    _allMessages = [];
+    messages = [];
+    _hasOlderHistory = true;
+    final ok = await _fetchHistory(0, 0, 40, restorePosition: false);
+    if (!ok) return false;
+    if (messages.length < 12 && _allMessages.isNotEmpty) {
+      await _fetchHistory(_allMessages.first.id, 0, 40, restorePosition: false);
+    }
+    _markChatRead();
+    return true;
   }
 
   // MARK: - Header
@@ -1021,6 +1053,32 @@ class ChatViewModel extends ChangeNotifier {
   void dismissPinned() {
     pinnedDismissed = true;
     notifyListeners();
+  }
+
+  Future<void> pinTodo(ChatMessage message) async {
+    await _client.query({
+      '@type': 'pinChatMessage',
+      'chat_id': chatId,
+      'message_id': message.id,
+      'disable_notification': true,
+      'only_for_self': false,
+    });
+    pinnedMessage = message;
+    pinnedDismissed = false;
+    notifyListeners();
+  }
+
+  Future<void> unpinTodo(ChatMessage message) async {
+    await _client.query({
+      '@type': 'unpinChatMessage',
+      'chat_id': chatId,
+      'message_id': message.id,
+    });
+    if (pinnedMessage?.id == message.id) {
+      pinnedMessage = null;
+      pinnedDismissed = false;
+      notifyListeners();
+    }
   }
 
   // MARK: - History

@@ -19,8 +19,6 @@ import '../call/call_manager.dart';
 import '../chat/chat_search_view.dart';
 import '../chat/chat_view.dart';
 import '../chat/full_image_viewer.dart';
-import '../chat/shared_media_view.dart';
-import '../components/icon_grid.dart';
 import '../components/photo_avatar.dart';
 import '../components/sf_symbols.dart';
 import '../components/ui_components.dart';
@@ -193,16 +191,6 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     );
   }
 
-  void _openMedia() {
-    final cid = _chatId;
-    if (cid == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SharedMediaView(chatId: cid, title: _name),
-      ),
-    );
-  }
-
   void _shareCard() {
     final link = (_username?.isNotEmpty ?? false)
         ? 'https://t.me/$_username'
@@ -251,33 +239,25 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   Widget build(BuildContext context) {
     final c = context.colors;
     return Scaffold(
-      backgroundColor: c.groupedBackground,
+      backgroundColor: c.card,
       body: Column(
         children: [
           Expanded(
             child: ListView(
-              padding: const EdgeInsets.only(bottom: 20),
+              padding: EdgeInsets.zero,
               children: [
                 _header(),
-                const SizedBox(height: 10),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: _secondaryActions(),
-                ),
+                Container(height: 12, color: c.groupedBackground),
+                _secondaryActions(),
                 if (_photos.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: _photosCard(),
-                  ),
+                  Container(height: 12, color: c.groupedBackground),
+                  _photosCard(),
                 ],
                 if (_infoRows.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: _infoCard(),
-                  ),
+                  Container(height: 12, color: c.groupedBackground),
+                  _infoCard(),
                 ],
+                const SizedBox(height: 24),
               ],
             ),
           ),
@@ -307,88 +287,27 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   /// Cover (blurred profile photo, gradient fallback) + overlapping avatar +
   /// name/username/status.
   Widget _header() {
-    final c = context.colors;
     final top = MediaQuery.of(context).padding.top;
-    final bannerH = top + 96;
+    final bannerH = top + 232;
     final status = _isOnline ? '在线' : _statusText;
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _cover(bannerH.toDouble()),
-            Container(
-              color: c.card,
-              padding: const EdgeInsets.fromLTRB(20, 12, 16, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.only(left: 88),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _name.isEmpty ? '?' : _name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 21,
-                            fontWeight: FontWeight.bold,
-                            color: c.textPrimary,
-                          ),
-                        ),
-                        if (_username?.isNotEmpty ?? false) ...[
-                          const SizedBox(height: 3),
-                          Text(
-                            '@$_username',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: c.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (status.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Row(
-                      children: [
-                        if (_isOnline) ...[
-                          const Icon(
-                            Icons.circle,
-                            size: 7,
-                            color: Color(0xFF1AC81A),
-                          ),
-                          const SizedBox(width: 5),
-                        ],
-                        Text(
-                          status,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: c.textSecondary,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
+        Column(children: [_cover(bannerH.toDouble()), _identityPanel(status)]),
         Positioned(
           top: top + 4,
-          left: 6,
+          left: 18,
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: () => Navigator.of(context).pop(),
-            child: const Padding(
-              padding: EdgeInsets.all(10),
+            child: Container(
+              width: 42,
+              height: 42,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.22),
+                shape: BoxShape.circle,
+              ),
               child: Icon(
                 Icons.arrow_back_ios_new,
                 size: 20,
@@ -398,21 +317,170 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           ),
         ),
         Positioned(
-          top: bannerH - 40,
-          left: 20,
-          child: Container(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: c.card, width: 3),
-            ),
-            child: PhotoAvatar(
-              title: _name.isEmpty ? '?' : _name,
-              photo: _photo,
-              size: 76,
+          top: top + 4,
+          right: 18,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: _shareCard,
+            child: Container(
+              width: 42,
+              height: 42,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.22),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(sfIcon('ellipsis'), size: 21, color: Colors.white),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _identityPanel(String status) {
+    final c = context.colors;
+    final idText = (_username?.isNotEmpty ?? false)
+        ? 'ID：$_username'
+        : (widget.userId > 0 ? 'ID：${widget.userId}' : '');
+    final subtitle = [
+      if (_phone.isNotEmpty) _phone,
+      if (idText.isNotEmpty) idText,
+    ].join('  ');
+    return Container(
+      transform: Matrix4.translationValues(0, -34, 0),
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      padding: const EdgeInsets.fromLTRB(32, 34, 32, 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: c.card, width: 4),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 16,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
+                child: PhotoAvatar(
+                  title: _name.isEmpty ? '?' : _name,
+                  photo: _photo,
+                  size: 104,
+                ),
+              ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _name.isEmpty ? '?' : _name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 30,
+                          height: 1.08,
+                          fontWeight: FontWeight.w700,
+                          color: c.textPrimary,
+                        ),
+                      ),
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: c.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (status.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                if (_isOnline) ...[
+                  const Icon(Icons.circle, size: 8, color: Color(0xFF1AC81A)),
+                  const SizedBox(width: 6),
+                ],
+                Text(
+                  status,
+                  style: TextStyle(fontSize: 14, color: c.textSecondary),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 20),
+          _profileBadges(),
+          if (_bio.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _bio,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 17, color: c.textPrimary),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Icon(sfIcon('pencil'), size: 18, color: c.textTertiary),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _profileBadges() {
+    final c = context.colors;
+    return Row(
+      children: [
+        _badge('VIP', const Color(0xFF9CA0A6), Colors.white),
+        const SizedBox(width: 8),
+        const Text('👑 ☀️ 🌙 🌙 ⭐ ⭐ ⭐', style: TextStyle(fontSize: 22)),
+        const Spacer(),
+        Icon(sfIcon('chevron.right'), size: 18, color: c.textTertiary),
+      ],
+    );
+  }
+
+  Widget _badge(String text, Color background, Color foreground) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: foreground,
+        ),
+      ),
     );
   }
 
@@ -440,61 +508,104 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   }
 
   Widget _secondaryActions() {
-    final c = context.colors;
-    final actions = <(String, String, VoidCallback)>[
-      ('person.crop.circle', '名片', _shareCard),
-      ('magnifyingglass', '查找记录', _openSearch),
-      ('folder.fill', '聊天文件', _openMedia),
-      (
-        _muted ? 'bell.slash.fill' : 'bell.fill',
-        _muted ? '已免打扰' : '免打扰',
-        _toggleMute,
-      ),
-      (
-        _blocked ? 'lock.fill' : 'nosign',
-        _blocked ? '已拉黑' : '拉黑',
-        _toggleBlock,
-      ),
-    ];
     return Container(
-      decoration: BoxDecoration(
-        color: c.card,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-      child: IconGrid(
-        perRow: 5,
-        children: [for (final a in actions) _actionTile(a.$1, a.$2, a.$3)],
+      color: context.colors.card,
+      child: Column(
+        children: [
+          _profileRow(
+            'star',
+            _username?.isNotEmpty ?? false ? '他的 QQ 空间' : 'QQ 空间',
+            trailing: _username?.isNotEmpty ?? false ? '最近有更新' : null,
+            showDot: _username?.isNotEmpty ?? false,
+            onTap: _shareCard,
+          ),
+          const InsetDivider(leadingInset: 62),
+          _profileRow('tshirt', '他正在用的装扮', trailing: '查看', onTap: _shareCard),
+          const InsetDivider(leadingInset: 62),
+          _profileRow(
+            'magnifyingglass',
+            '查找聊天记录',
+            trailing: '图片、视频、文件等',
+            onTap: _openSearch,
+          ),
+          const InsetDivider(leadingInset: 62),
+          _profileRow(
+            _muted ? 'bell.slash.fill' : 'bell.fill',
+            _muted ? '已开启消息免打扰' : '消息免打扰',
+            trailing: _muted ? '开启' : '关闭',
+            onTap: _toggleMute,
+          ),
+          const InsetDivider(leadingInset: 62),
+          _profileRow(
+            _blocked ? 'lock.fill' : 'nosign',
+            _blocked ? '已加入黑名单' : '加入黑名单',
+            trailing: _blocked ? '开启' : '关闭',
+            onTap: _toggleBlock,
+          ),
+        ],
       ),
     );
   }
 
-  Widget _actionTile(String icon, String label, VoidCallback onTap) {
+  Widget _profileRow(
+    String icon,
+    String title, {
+    String? trailing,
+    bool showDot = false,
+    required VoidCallback onTap,
+  }) {
     final c = context.colors;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 46,
-            height: 46,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: AppTheme.brand.withValues(alpha: 0.12),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(sfIcon(icon), size: 21, color: AppTheme.brand),
+      child: SizedBox(
+        height: 72,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(32, 0, 28, 0),
+          child: Row(
+            children: [
+              Icon(sfIcon(icon), size: 27, color: c.textPrimary),
+              const SizedBox(width: 20),
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w500,
+                    color: c.textPrimary,
+                  ),
+                ),
+              ),
+              if (trailing != null) ...[
+                const SizedBox(width: 12),
+                Flexible(
+                  child: Text(
+                    trailing,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                    style: TextStyle(fontSize: 15, color: c.textTertiary),
+                  ),
+                ),
+              ],
+              if (showDot) ...[
+                const SizedBox(width: 9),
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: AppTheme.tagRed,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ],
+              const SizedBox(width: 10),
+              Icon(sfIcon('chevron.right'), size: 18, color: c.textTertiary),
+            ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 11, color: c.textPrimary),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -513,21 +624,15 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           child: Row(
             children: [
               Expanded(
-                child: _barButton(
-                  'phone.fill',
-                  '音视频通话',
-                  primary: false,
-                  onTap: _callMenu,
-                ),
+                child: _barButton('音视频通话', primary: false, onTap: _callMenu),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _barButton(
-                  'message.fill',
-                  '发消息',
-                  primary: true,
-                  onTap: _openChat,
-                ),
+                child: _barButton('送礼物', primary: false, onTap: _shareCard),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _barButton('发消息', primary: true, onTap: _openChat),
               ),
             ],
           ),
@@ -537,7 +642,6 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
   }
 
   Widget _barButton(
-    String icon,
     String label, {
     required bool primary,
     required VoidCallback onTap,
@@ -557,12 +661,6 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              sfIcon(icon),
-              size: 18,
-              color: primary ? Colors.white : AppTheme.brand,
-            ),
-            const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(

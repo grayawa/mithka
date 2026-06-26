@@ -266,8 +266,11 @@ class _ChatListViewState extends State<ChatListView> {
     }
 
     final rowH = context.read<ThemeController>().rowHeight + 0.5;
+    final searchOffset = context.read<ThemeController>().showChatListSearch
+        ? AppSpacing.md + AppMetric.searchHeight + AppSpacing.sm
+        : 0.0;
     return math.min(
-      itemIndex * rowH,
+      searchOffset + itemIndex * rowH,
       _scrollController.position.maxScrollExtent,
     );
   }
@@ -290,7 +293,6 @@ class _ChatListViewState extends State<ChatListView> {
           child: Column(
             children: [
               _header(),
-              _searchPill(),
               Expanded(child: _chatList()),
             ],
           ),
@@ -475,6 +477,7 @@ class _ChatListViewState extends State<ChatListView> {
             borderRadius: BorderRadius.circular(AppRadius.control),
           ),
           child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
                 sfIcon('magnifyingglass'),
@@ -500,6 +503,7 @@ class _ChatListViewState extends State<ChatListView> {
 
   Widget _chatList() {
     final c = context.colors;
+    final showSearch = context.watch<ThemeController>().showChatListSearch;
     return Container(
       color: c.background,
       child: LayoutBuilder(
@@ -513,6 +517,7 @@ class _ChatListViewState extends State<ChatListView> {
 
           // Build flat item list with the 群助手 entry interleaved.
           final items = <Widget>[];
+          if (showSearch) items.add(_searchPill());
           for (var i = 0; i < chats.length; i++) {
             if (hasArchive && i == assistantIndex) items.add(_assistantRow());
             items.add(_swipeRow(chats[i]));
@@ -523,7 +528,6 @@ class _ChatListViewState extends State<ChatListView> {
 
           return ListView.builder(
             controller: _scrollController,
-            itemExtent: rowH,
             padding:
                 EdgeInsets.zero, // header already consumed the top safe-area
             itemCount: items.length,

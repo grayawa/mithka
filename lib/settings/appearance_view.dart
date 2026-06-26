@@ -12,6 +12,7 @@ import 'package:provider/provider.dart';
 import '../components/ui_components.dart';
 import '../theme/app_theme.dart';
 import '../theme/theme_controller.dart';
+import 'edit_field_view.dart';
 
 class AppearanceView extends StatelessWidget {
   const AppearanceView({super.key});
@@ -48,6 +49,23 @@ class AppearanceView extends StatelessWidget {
                 const SizedBox(height: AppSpacing.xl),
                 _label(context, '大小'),
                 _fontSizeCard(context, theme),
+                const SizedBox(height: AppSpacing.xl),
+                _label(context, '字体'),
+                _card(context, [
+                  _navigationRow(
+                    context,
+                    '字体',
+                    theme.fontChoice.isCjk
+                        ? theme.effectivePrimaryFontLabel
+                        : '${theme.effectivePrimaryFontLabel} / ${theme.effectiveCjkFontLabel}',
+                    () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const FontSettingsView(),
+                      ),
+                    ),
+                    icon: Icons.font_download_outlined,
+                  ),
+                ]),
                 const SizedBox(height: AppSpacing.xl),
                 _label(context, '主题颜色'),
                 _colorCard(context, theme),
@@ -107,6 +125,13 @@ class AppearanceView extends StatelessWidget {
                     theme.showMessageMetaIndicators,
                     (v) => theme.showMessageMetaIndicators = v,
                   ),
+                  _toggleRow(
+                    context,
+                    Icons.vertical_align_bottom_rounded,
+                    '打开聊天显示最新消息',
+                    theme.openChatsAtLatest,
+                    (v) => theme.openChatsAtLatest = v,
+                  ),
                 ]),
                 const SizedBox(height: AppSpacing.xl),
                 _label(context, '聊天列表'),
@@ -117,6 +142,13 @@ class AppearanceView extends StatelessWidget {
                     '顶部显示聊天分组筛选',
                     theme.showChatFolderFilter,
                     (v) => theme.showChatFolderFilter = v,
+                  ),
+                  _toggleRow(
+                    context,
+                    Icons.search_rounded,
+                    '显示聊天列表搜索',
+                    theme.showChatListSearch,
+                    (v) => theme.showChatListSearch = v,
                   ),
                   _toggleRow(
                     context,
@@ -441,6 +473,401 @@ class AppearanceView extends StatelessWidget {
               onChanged: onChanged,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _navigationRow(
+    BuildContext context,
+    String label,
+    String value,
+    VoidCallback onTap, {
+    IconData? icon,
+  }) {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: AppMetric.menuRowHeight + AppSpacing.xxs,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
+          child: Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: AppIconSize.xl, color: AppTheme.brand),
+                const SizedBox(width: AppSpacing.xl),
+              ],
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: AppTextSize.bodyLarge,
+                  color: c.textPrimary,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: AppTextSize.body,
+                    color: c.textTertiary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: AppIconSize.lg,
+                color: c.textTertiary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class FontSettingsView extends StatelessWidget {
+  const FontSettingsView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final theme = context.watch<ThemeController>();
+    final showCjkFallback = !theme.fontChoice.isCjk;
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(title: '字体', onBack: () => Navigator.of(context).pop()),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [
+                _settingsCard(context, [
+                  _settingsRow(
+                    context,
+                    '主要字体',
+                    theme.fontChoice.label,
+                    () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const FontPickerView(
+                          title: '主要字体',
+                          kind: FontPickerKind.primary,
+                        ),
+                      ),
+                    ),
+                  ),
+                  _settingsRow(
+                    context,
+                    '自定义主要字体',
+                    theme.customPrimaryFontFamily.isEmpty
+                        ? '未设置'
+                        : theme.customPrimaryFontFamily,
+                    () => _editCustomFont(
+                      context,
+                      title: '自定义主要字体',
+                      initial: theme.customPrimaryFontFamily,
+                      onSave: (value) =>
+                          context
+                                  .read<ThemeController>()
+                                  .customPrimaryFontFamily =
+                              value,
+                    ),
+                  ),
+                  if (showCjkFallback)
+                    _settingsRow(
+                      context,
+                      '汉字字体',
+                      theme.cjkFontChoice.label,
+                      () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const FontPickerView(
+                            title: '汉字字体',
+                            kind: FontPickerKind.cjk,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (showCjkFallback)
+                    _settingsRow(
+                      context,
+                      '自定义汉字字体',
+                      theme.customCjkFontFamily.isEmpty
+                          ? '未设置'
+                          : theme.customCjkFontFamily,
+                      () => _editCustomFont(
+                        context,
+                        title: '自定义汉字字体',
+                        initial: theme.customCjkFontFamily,
+                        onSave: (value) =>
+                            context
+                                    .read<ThemeController>()
+                                    .customCjkFontFamily =
+                                value,
+                      ),
+                    ),
+                ]),
+                const SizedBox(height: AppSpacing.md),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.xxl,
+                  ),
+                  child: Text(
+                    showCjkFallback
+                        ? '主要字体用于西文；汉字字体用于中文、日文等 CJK 字符。'
+                        : '当前主要字体已覆盖汉字，不需要单独设置汉字字体。',
+                    style: TextStyle(
+                      fontSize: AppTextSize.footnote,
+                      color: c.textTertiary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _settingsCard(BuildContext context, List<Widget> rows) {
+    final c = context.colors;
+    return Container(
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (var i = 0; i < rows.length; i++) ...[
+            rows[i],
+            if (i < rows.length - 1)
+              const InsetDivider(leadingInset: AppSpacing.xxl),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _editCustomFont(
+    BuildContext context, {
+    required String title,
+    required String initial,
+    required ValueChanged<String> onSave,
+  }) async {
+    final value = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => EditFieldView(
+          title: title,
+          initial: initial,
+          hint: '输入系统字体 family，例如 Futura 或 PingFang SC；留空使用预设',
+          maxLength: 80,
+        ),
+      ),
+    );
+    if (value == null || !context.mounted) return;
+    onSave(value);
+  }
+
+  Widget _settingsRow(
+    BuildContext context,
+    String label,
+    String value,
+    VoidCallback onTap,
+  ) {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: AppMetric.menuRowHeight + AppSpacing.xxs,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
+          child: Row(
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: AppTextSize.bodyLarge,
+                  color: c.textPrimary,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                    fontSize: AppTextSize.body,
+                    color: c.textTertiary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Icon(
+                Icons.chevron_right_rounded,
+                size: AppIconSize.lg,
+                color: c.textTertiary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+enum FontPickerKind { primary, cjk }
+
+class FontPickerView extends StatelessWidget {
+  const FontPickerView({super.key, required this.title, required this.kind});
+
+  final String title;
+  final FontPickerKind kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final theme = context.watch<ThemeController>();
+    final fonts = switch (kind) {
+      FontPickerKind.primary => AppFontChoice.primaryOptions,
+      FontPickerKind.cjk => AppFontChoice.cjkOptions,
+    };
+    final selected = switch (kind) {
+      FontPickerKind.primary => theme.fontChoice,
+      FontPickerKind.cjk => theme.cjkFontChoice,
+    };
+    return Scaffold(
+      backgroundColor: c.groupedBackground,
+      body: Column(
+        children: [
+          NavHeader(title: title, onBack: () => Navigator.of(context).pop()),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.xl,
+                AppSpacing.lg,
+                AppSpacing.section,
+              ),
+              children: [_fontCard(context, fonts, selected)],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _fontCard(
+    BuildContext context,
+    List<AppFontChoice> fonts,
+    AppFontChoice selected,
+  ) {
+    final c = context.colors;
+    final rows = fonts
+        .map(
+          (font) => _fontRow(
+            context,
+            font,
+            selected: selected == font,
+            onTap: () {
+              final theme = context.read<ThemeController>();
+              switch (kind) {
+                case FontPickerKind.primary:
+                  theme.fontChoice = font;
+                case FontPickerKind.cjk:
+                  theme.cjkFontChoice = font;
+              }
+            },
+          ),
+        )
+        .toList();
+    return Container(
+      decoration: BoxDecoration(
+        color: c.card,
+        borderRadius: BorderRadius.circular(AppRadius.card),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          for (var i = 0; i < rows.length; i++) ...[
+            rows[i],
+            if (i < rows.length - 1)
+              const InsetDivider(leadingInset: AppSpacing.xxl),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _fontRow(
+    BuildContext context,
+    AppFontChoice font, {
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final c = context.colors;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        height: AppMetric.menuRowHeight + AppSpacing.md,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xxl),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      font.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: font.previewStyle(
+                        TextStyle(
+                          fontSize: AppTextSize.bodyLarge,
+                          color: c.textPrimary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      font.previewText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: font.previewStyle(
+                        TextStyle(
+                          fontSize: AppTextSize.footnote,
+                          color: c.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              if (selected)
+                Icon(Icons.check, size: AppIconSize.lg, color: AppTheme.brand),
+            ],
+          ),
         ),
       ),
     );

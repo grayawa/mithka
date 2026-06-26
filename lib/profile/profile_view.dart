@@ -27,6 +27,7 @@ import '../settings/edit_profile_view.dart';
 import '../settings/settings_view.dart';
 import 'my_album_view.dart';
 import 'emoji_status_picker.dart';
+import 'profile_detail_view.dart';
 import '../tdlib/json_helpers.dart';
 import '../tdlib/td_client.dart';
 import '../tdlib/td_models.dart';
@@ -193,6 +194,16 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
+  void _openMyProfile() {
+    final user = _vm.user;
+    if (user == null || user.id <= 0) return;
+    _root.push(
+      MaterialPageRoute(
+        builder: (_) => ProfileDetailView(userId: user.id, name: user.name),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -236,6 +247,15 @@ class _ProfileViewState extends State<ProfileView> {
             Row(
               children: [
                 const Spacer(),
+                GestureDetector(
+                  onTap: _openMyProfile,
+                  child: Icon(
+                    sfIcon('person.crop.circle'),
+                    size: 22,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(width: 16),
                 GestureDetector(
                   onTap: () => _root.push(
                     MaterialPageRoute(

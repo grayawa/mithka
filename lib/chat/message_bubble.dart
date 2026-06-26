@@ -95,6 +95,7 @@ class _MessageBubbleState extends State<MessageBubble>
   static const double _replyTrigger = 48;
   static const double _replyRestingLimit = 72;
   static const double _replyHardLimit = 104;
+  static const double _mediaMaxSide = 200;
 
   final VoicePlayer _voice = VoicePlayer();
   final GlobalKey _bubbleKey = GlobalKey();
@@ -246,10 +247,14 @@ class _MessageBubbleState extends State<MessageBubble>
                   ),
                 ),
                 const SizedBox(width: 8),
-                PhotoAvatar(
-                  title: widget.meName,
-                  photo: widget.mePhoto,
-                  size: 38,
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => widget.onAvatarTap?.call(message),
+                  child: PhotoAvatar(
+                    title: widget.meName,
+                    photo: widget.mePhoto,
+                    size: 38,
+                  ),
                 ),
               ]
             : [
@@ -1086,13 +1091,13 @@ class _MessageBubbleState extends State<MessageBubble>
       entities ?? message.textEntities,
     );
     if (appendMeta) children.add(_metaSpan(outgoing));
+    final style = DefaultTextStyle.of(
+      context,
+    ).style.merge(TextStyle(fontSize: fontSize, color: base));
     return RichText(
       maxLines: maxLines,
       overflow: maxLines == null ? TextOverflow.clip : TextOverflow.fade,
-      text: TextSpan(
-        style: TextStyle(fontSize: fontSize, color: base),
-        children: children,
-      ),
+      text: TextSpan(style: style, children: children),
     );
   }
 
@@ -1388,6 +1393,7 @@ class _MessageBubbleState extends State<MessageBubble>
     final size = _imageDisplaySize();
     final caption = _caption();
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: outgoing
           ? CrossAxisAlignment.end
           : CrossAxisAlignment.start,
@@ -1423,6 +1429,7 @@ class _MessageBubbleState extends State<MessageBubble>
     final caption = _caption();
     final dur = message.videoDuration ?? 0;
     return Column(
+      mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: outgoing
           ? CrossAxisAlignment.end
           : CrossAxisAlignment.start,
@@ -1509,9 +1516,9 @@ class _MessageBubbleState extends State<MessageBubble>
     return _fitSize(
       width: message.imageWidth,
       height: message.imageHeight,
-      maxWidth: 240,
-      maxHeight: 280,
-      fallback: const Size(200, 200),
+      maxWidth: _mediaMaxSide,
+      maxHeight: _mediaMaxSide,
+      fallback: const Size(_mediaMaxSide, _mediaMaxSide),
     );
   }
 

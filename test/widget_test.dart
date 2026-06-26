@@ -4,6 +4,8 @@ import 'package:mithka/tdlib/json_helpers.dart';
 import 'package:mithka/tdlib/td_models.dart';
 import 'package:mithka/settings/translation_controller.dart';
 import 'package:mithka/theme/date_text.dart';
+import 'package:mithka/theme/theme_controller.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -145,6 +147,34 @@ void main() {
       expect(preview.imageWidth, 320);
       expect(preview.imageHeight, 180);
       expect(preview.showLargeMedia, isTrue);
+    });
+  });
+
+  group('AppFontChoice', () {
+    test('applies primary font before CJK and system fallbacks', () {
+      final style = AppFontChoice.futura.applyTextStyle(
+        const TextStyle(fontSize: 16),
+        cjkFallback: AppFontChoice.pingFangTw,
+      );
+
+      expect(style.fontFamily, 'Futura');
+      expect(style.fontFamilyFallback, isNotNull);
+      expect(style.fontFamilyFallback!.first, 'PingFang TC');
+      expect(style.fontFamilyFallback!, contains('Helvetica Neue'));
+    });
+
+    test('custom font families override preset font families', () {
+      final style = AppFontChoice.futura.applyTextStyle(
+        const TextStyle(fontSize: 16),
+        cjkFallback: AppFontChoice.pingFangTw,
+        customPrimaryFamily: 'My Latin',
+        customCjkFamily: 'My CJK',
+      );
+
+      expect(style.fontFamily, 'My Latin');
+      expect(style.fontFamilyFallback, isNotNull);
+      expect(style.fontFamilyFallback!.first, 'My CJK');
+      expect(style.fontFamilyFallback!.length, greaterThan(1));
     });
   });
 

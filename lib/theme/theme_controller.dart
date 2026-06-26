@@ -6,7 +6,9 @@
 //  applied through providers at the app root.
 //
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app_theme.dart';
@@ -36,6 +38,528 @@ enum UnreadBadgeMode {
   final IconData icon;
 }
 
+enum AppFontChoice {
+  system('系统默认', '消息预览 Aa 123', cjk: true),
+  apple('Apple / 苹方', '消息预览 Aa 123', cjk: true),
+  pingFang('苹方简体 [CN]', 'CN 简体 门 说 线 骨 令', cjk: true),
+  pingFangHk('苹方香港 [HK]', 'HK 繁體 門 說 綫 骨 令', cjk: true),
+  pingFangTw('苹方繁体 [TW]', 'TW 正體 門 說 線 骨 令', cjk: true),
+  hiraginoSansJp('Hiragino [JP]', 'JP 日本語 門 説 線 骨 令', cjk: true),
+  helvetica('Helvetica Neue', 'Message preview Aa 123'),
+  avenirNext('Avenir Next', 'Avenir Next Aa 123'),
+  avenir('Avenir', 'Avenir Aa 123'),
+  futura('Futura', 'Futura Aa 123'),
+  optima('Optima', 'Optima Aa 123'),
+  palatino('Palatino', 'Palatino Aa 123'),
+  georgia('Georgia', 'Georgia Aa 123'),
+  timesNewRoman('Times New Roman', 'Times New Roman Aa 123'),
+  verdana('Verdana', 'Verdana Aa 123'),
+  trebuchetMs('Trebuchet MS', 'Trebuchet MS Aa 123'),
+  gillSans('Gill Sans', 'Gill Sans Aa 123'),
+  didot('Didot', 'Didot Aa 123'),
+  americanTypewriter('American Typewriter', 'American Typewriter Aa 123'),
+  menlo('Menlo', 'Menlo Aa 123 代码'),
+  courierNew('Courier New', 'Courier New Aa 123 代码'),
+  noteworthy('Noteworthy', 'Noteworthy Aa 123'),
+  markerFelt('Marker Felt', 'Marker Felt Aa 123'),
+  roboto('Roboto', 'Message preview Aa 123'),
+  notoSans('Noto Sans', '消息预览 Aa 123'),
+  notoSansCjk('Noto Sans CJK [CN]', 'CN/HK/TW/JP 门 門 戸 說 説', cjk: true),
+  googleInter('Inter', 'Inter Aa 123', googleFamily: 'Inter'),
+  googleOpenSans('Open Sans', 'Open Sans Aa 123', googleFamily: 'Open Sans'),
+  googleLato('Lato', 'Lato Aa 123', googleFamily: 'Lato'),
+  googleMontserrat(
+    'Montserrat',
+    'Montserrat Aa 123',
+    googleFamily: 'Montserrat',
+  ),
+  googlePoppins('Poppins', 'Poppins Aa 123', googleFamily: 'Poppins'),
+  googleNunito('Nunito', 'Nunito Aa 123', googleFamily: 'Nunito'),
+  googleRaleway('Raleway', 'Raleway Aa 123', googleFamily: 'Raleway'),
+  googleSourceSans3(
+    'Source Sans 3',
+    'Source Sans 3 Aa 123',
+    googleFamily: 'Source Sans 3',
+  ),
+  googleMerriweather(
+    'Merriweather',
+    'Merriweather Aa 123',
+    googleFamily: 'Merriweather',
+  ),
+  googlePlayfairDisplay(
+    'Playfair Display',
+    'Playfair Display Aa 123',
+    googleFamily: 'Playfair Display',
+  ),
+  googleNotoSerif(
+    'Noto Serif',
+    'Noto Serif Aa 123',
+    googleFamily: 'Noto Serif',
+  ),
+  googleKleeOne(
+    'Klee One [JP]',
+    'Klee One 日本語 門 説 線',
+    googleFamily: 'Klee One',
+    cjk: true,
+  ),
+  googleDotGothic16(
+    'DotGothic16 [JP]',
+    'DotGothic16 日本語 門 説 線',
+    googleFamily: 'DotGothic16',
+    cjk: true,
+  ),
+  googleStick(
+    'Stick [JP]',
+    'Stick 日本語 門 説 線',
+    googleFamily: 'Stick',
+    cjk: true,
+  ),
+  googleMPlus1p(
+    'M PLUS 1p [JP]',
+    'M PLUS 1p 日本語 門 説 線',
+    googleFamily: 'M PLUS 1p',
+    cjk: true,
+  ),
+  lineSeedJp('LINE Seed JP [JP]', 'LINE Seed JP 日本語 門 説 線', cjk: true),
+  googleChocolateClassicalSans(
+    'Chocolate Classical Sans [TW]',
+    'Chocolate Classical Sans 門 說 線',
+    googleFamily: 'Chocolate Classical Sans',
+    cjk: true,
+  ),
+  googleNotoSansSc(
+    'Noto Sans SC [CN]',
+    'CN 简体 门 说 线 骨 令',
+    googleFamily: 'Noto Sans SC',
+    cjk: true,
+  ),
+  googleNotoSansHk(
+    'Noto Sans HK [HK]',
+    'HK 繁體 門 說 綫 骨 令',
+    googleFamily: 'Noto Sans HK',
+    cjk: true,
+  ),
+  googleNotoSansTc(
+    'Noto Sans TC [TW]',
+    'TW 正體 門 說 線 骨 令',
+    googleFamily: 'Noto Sans TC',
+    cjk: true,
+  ),
+  googleNotoSansJp(
+    'Noto Sans JP [JP]',
+    'JP 日本語 門 説 線 骨 令',
+    googleFamily: 'Noto Sans JP',
+    cjk: true,
+  ),
+  googleLxgwWenKaiTc(
+    'LXGW WenKai TC [TW]',
+    '霞鹜文楷 門 說 線',
+    googleFamily: 'LXGW WenKai TC',
+    cjk: true,
+  ),
+  googleZcoolXiaoWei(
+    'ZCOOL XiaoWei [CN]',
+    '站酷小薇 门 說 線',
+    googleFamily: 'ZCOOL XiaoWei',
+    cjk: true,
+  );
+
+  const AppFontChoice(
+    this.label,
+    this.previewText, {
+    this.googleFamily,
+    this.cjk = false,
+  });
+
+  final String label;
+  final String previewText;
+  final String? googleFamily;
+  final bool cjk;
+
+  static List<AppFontChoice> get primaryOptions => [
+    ...AppFontChoice.values.where((font) => font.cjk),
+    ...AppFontChoice.values.where((font) => !font.cjk),
+  ];
+
+  static List<AppFontChoice> get cjkOptions => AppFontChoice.values
+      .where((font) => font.cjk && font != AppFontChoice.system)
+      .toList(growable: false);
+
+  bool get isGoogleFont => googleFamily != null;
+  bool get isCjk => cjk;
+
+  String get fontFamily {
+    return switch (this) {
+      AppFontChoice.system => _platformFontFamily(),
+      AppFontChoice.apple => '.AppleSystemUIFont',
+      AppFontChoice.pingFang => 'PingFang SC',
+      AppFontChoice.pingFangHk => 'PingFang HK',
+      AppFontChoice.pingFangTw => 'PingFang TC',
+      AppFontChoice.hiraginoSansJp => 'Hiragino Sans',
+      AppFontChoice.helvetica => 'Helvetica Neue',
+      AppFontChoice.avenirNext => 'Avenir Next',
+      AppFontChoice.avenir => 'Avenir',
+      AppFontChoice.futura => 'Futura',
+      AppFontChoice.optima => 'Optima',
+      AppFontChoice.palatino => 'Palatino',
+      AppFontChoice.georgia => 'Georgia',
+      AppFontChoice.timesNewRoman => 'Times New Roman',
+      AppFontChoice.verdana => 'Verdana',
+      AppFontChoice.trebuchetMs => 'Trebuchet MS',
+      AppFontChoice.gillSans => 'Gill Sans',
+      AppFontChoice.didot => 'Didot',
+      AppFontChoice.americanTypewriter => 'American Typewriter',
+      AppFontChoice.menlo => 'Menlo',
+      AppFontChoice.courierNew => 'Courier New',
+      AppFontChoice.noteworthy => 'Noteworthy',
+      AppFontChoice.markerFelt => 'Marker Felt',
+      AppFontChoice.roboto => 'Roboto',
+      AppFontChoice.notoSans => 'Noto Sans',
+      AppFontChoice.notoSansCjk => 'Noto Sans CJK SC',
+      AppFontChoice.lineSeedJp => 'LINE Seed Sans JP',
+      _ => googleFamily!.replaceAll(' ', ''),
+    };
+  }
+
+  List<String> get fontFamilyFallback {
+    return switch (this) {
+      AppFontChoice.system => _platformFontFallback(),
+      AppFontChoice.apple => const [
+        'PingFang SC',
+        'PingFang TC',
+        'Hiragino Sans',
+        'Helvetica Neue',
+        'Arial',
+      ],
+      AppFontChoice.pingFang => const [
+        'PingFang HK',
+        'PingFang TC',
+        'Hiragino Sans',
+        'Helvetica Neue',
+        'Arial',
+      ],
+      AppFontChoice.pingFangHk => const [
+        'PingFang TC',
+        'PingFang SC',
+        'Hiragino Sans',
+        'Helvetica Neue',
+        'Arial',
+      ],
+      AppFontChoice.pingFangTw => const [
+        'PingFang HK',
+        'PingFang SC',
+        'Hiragino Sans',
+        'Helvetica Neue',
+        'Arial',
+      ],
+      AppFontChoice.hiraginoSansJp => const [
+        'Hiragino Sans GB',
+        'PingFang SC',
+        'PingFang TC',
+        'Helvetica Neue',
+        'Arial',
+      ],
+      AppFontChoice.helvetica => const ['PingFang SC', 'PingFang TC', 'Arial'],
+      AppFontChoice.avenirNext ||
+      AppFontChoice.avenir ||
+      AppFontChoice.futura ||
+      AppFontChoice.optima ||
+      AppFontChoice.palatino ||
+      AppFontChoice.georgia ||
+      AppFontChoice.timesNewRoman ||
+      AppFontChoice.verdana ||
+      AppFontChoice.trebuchetMs ||
+      AppFontChoice.gillSans ||
+      AppFontChoice.didot ||
+      AppFontChoice.americanTypewriter ||
+      AppFontChoice.menlo ||
+      AppFontChoice.courierNew ||
+      AppFontChoice.noteworthy ||
+      AppFontChoice.markerFelt => const [
+        'PingFang SC',
+        'PingFang HK',
+        'PingFang TC',
+        'Hiragino Sans',
+        'Arial',
+      ],
+      AppFontChoice.roboto => const [
+        'Noto Sans CJK SC',
+        'Noto Sans CJK TC',
+        'Noto Sans',
+        'sans-serif',
+      ],
+      AppFontChoice.notoSans => const [
+        'Noto Sans CJK SC',
+        'Noto Sans CJK TC',
+        'Arial',
+      ],
+      AppFontChoice.notoSansCjk => const [
+        'Noto Sans CJK TC',
+        'Noto Sans',
+        'Arial',
+      ],
+      AppFontChoice.lineSeedJp => const [
+        'LINE Seed Sans JP',
+        'LINE Seed JP',
+        'Hiragino Sans',
+        'PingFang SC',
+        'PingFang TC',
+        'Arial',
+      ],
+      AppFontChoice.googleNotoSansSc => const [
+        'PingFang SC',
+        'PingFang TC',
+        'Hiragino Sans',
+        'Arial',
+      ],
+      AppFontChoice.googleNotoSansHk => const [
+        'PingFang HK',
+        'PingFang TC',
+        'PingFang SC',
+        'Arial',
+      ],
+      AppFontChoice.googleNotoSansTc => const [
+        'PingFang TC',
+        'PingFang HK',
+        'PingFang SC',
+        'Arial',
+      ],
+      AppFontChoice.googleNotoSansJp => const [
+        'Hiragino Sans',
+        'PingFang SC',
+        'Arial',
+      ],
+      AppFontChoice.googleLxgwWenKaiTc => const [
+        'PingFang TC',
+        'PingFang SC',
+        'Hiragino Sans',
+        'Arial',
+      ],
+      AppFontChoice.googleZcoolXiaoWei => const [
+        'PingFang SC',
+        'PingFang TC',
+        'Arial',
+      ],
+      _ => const ['PingFang SC', 'PingFang TC', 'Hiragino Sans', 'Arial'],
+    };
+  }
+
+  List<String> effectiveFallback(
+    AppFontChoice cjkFallback, [
+    TextStyle? base,
+    String? customCjkFamily,
+  ]) {
+    if (isCjk) {
+      final ownGoogleFallback = isGoogleFont
+          ? _googleFamiliesForStyle(base)
+          : const <String>[];
+      return _dedupe([
+        ...ownGoogleFallback,
+        ...fontFamilyFallback,
+        ..._platformFontFallback(),
+      ]);
+    }
+    final customCjk = customCjkFamily?.trim();
+    return _dedupe([
+      if (customCjk != null && customCjk.isNotEmpty) customCjk,
+      if (customCjk == null || customCjk.isEmpty)
+        ...cjkFallback.familiesForStyle(base),
+      ..._platformFontFallback(),
+    ]);
+  }
+
+  TextTheme applyTextTheme(
+    TextTheme textTheme, {
+    required AppFontChoice cjkFallback,
+    String? customPrimaryFamily,
+    String? customCjkFamily,
+  }) {
+    return textTheme.copyWith(
+      displayLarge: _applyNullableStyle(
+        textTheme.displayLarge,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      displayMedium: _applyNullableStyle(
+        textTheme.displayMedium,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      displaySmall: _applyNullableStyle(
+        textTheme.displaySmall,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      headlineLarge: _applyNullableStyle(
+        textTheme.headlineLarge,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      headlineMedium: _applyNullableStyle(
+        textTheme.headlineMedium,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      headlineSmall: _applyNullableStyle(
+        textTheme.headlineSmall,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      titleLarge: _applyNullableStyle(
+        textTheme.titleLarge,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      titleMedium: _applyNullableStyle(
+        textTheme.titleMedium,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      titleSmall: _applyNullableStyle(
+        textTheme.titleSmall,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      bodyLarge: _applyNullableStyle(
+        textTheme.bodyLarge,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      bodyMedium: _applyNullableStyle(
+        textTheme.bodyMedium,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      bodySmall: _applyNullableStyle(
+        textTheme.bodySmall,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      labelLarge: _applyNullableStyle(
+        textTheme.labelLarge,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      labelMedium: _applyNullableStyle(
+        textTheme.labelMedium,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+      labelSmall: _applyNullableStyle(
+        textTheme.labelSmall,
+        cjkFallback,
+        customPrimaryFamily,
+        customCjkFamily,
+      ),
+    );
+  }
+
+  TextStyle previewStyle(TextStyle base) {
+    return applyTextStyle(base, cjkFallback: this);
+  }
+
+  TextStyle applyTextStyle(
+    TextStyle base, {
+    required AppFontChoice cjkFallback,
+    String? customPrimaryFamily,
+    String? customCjkFamily,
+  }) {
+    final customPrimary = customPrimaryFamily?.trim();
+    final withPrimary = customPrimary != null && customPrimary.isNotEmpty
+        ? base.copyWith(fontFamily: customPrimary)
+        : isGoogleFont
+        ? GoogleFonts.getFont(googleFamily!, textStyle: base)
+        : base.copyWith(fontFamily: fontFamily);
+    return withPrimary.copyWith(
+      fontFamilyFallback: effectiveFallback(cjkFallback, base, customCjkFamily),
+    );
+  }
+
+  TextStyle? _applyNullableStyle(
+    TextStyle? style,
+    AppFontChoice cjkFallback,
+    String? customPrimaryFamily,
+    String? customCjkFamily,
+  ) {
+    if (style == null) return null;
+    return applyTextStyle(
+      style,
+      cjkFallback: cjkFallback,
+      customPrimaryFamily: customPrimaryFamily,
+      customCjkFamily: customCjkFamily,
+    );
+  }
+
+  List<String> familiesForStyle(TextStyle? base) {
+    if (isGoogleFont) {
+      return _dedupe([..._googleFamiliesForStyle(base), ...fontFamilyFallback]);
+    }
+    return _dedupe([fontFamily, ...fontFamilyFallback]);
+  }
+
+  List<String> _googleFamiliesForStyle(TextStyle? base) {
+    final family = googleFamily;
+    if (family == null) return const <String>[];
+    final style = GoogleFonts.getFont(
+      family,
+      textStyle: base ?? const TextStyle(),
+    );
+    return [
+      if (style.fontFamily != null) style.fontFamily!,
+      ...?style.fontFamilyFallback,
+    ];
+  }
+
+  static List<String> _dedupe(List<String> values) {
+    final seen = <String>{};
+    return [
+      for (final value in values)
+        if (value.isNotEmpty && seen.add(value)) value,
+    ];
+  }
+
+  static String _platformFontFamily() {
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.iOS || TargetPlatform.macOS => '.AppleSystemUIFont',
+      TargetPlatform.android => 'Roboto',
+      _ => 'system-ui',
+    };
+  }
+
+  static List<String> _platformFontFallback() {
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.iOS || TargetPlatform.macOS => const [
+        'PingFang SC',
+        'PingFang TC',
+        'Hiragino Sans',
+        'Helvetica Neue',
+        'Arial',
+      ],
+      TargetPlatform.android => const [
+        'Noto Sans CJK SC',
+        'Noto Sans CJK TC',
+        'Noto Sans',
+        'sans-serif',
+      ],
+      _ => const ['Noto Sans CJK SC', 'Noto Sans', 'Arial'],
+    };
+  }
+}
+
 class ThemeController extends ChangeNotifier {
   ThemeController(this._prefs) {
     _mode = AppearanceMode.values.firstWhere(
@@ -45,10 +569,23 @@ class ThemeController extends ChangeNotifier {
     _brandColor = Color(
       _prefs.getInt(_brandKey) ?? (0xFF000000 | AppTheme.defaultBrand),
     );
+    _fontChoice = AppFontChoice.values.firstWhere(
+      (m) => m.name == _prefs.getString(_fontChoiceKey),
+      orElse: () => AppFontChoice.system,
+    );
+    _cjkFontChoice = AppFontChoice.cjkOptions.firstWhere(
+      (m) => m.name == _prefs.getString(_cjkFontChoiceKey),
+      orElse: () => AppFontChoice.pingFang,
+    );
+    _customPrimaryFontFamily =
+        _prefs.getString(_customPrimaryFontFamilyKey)?.trim() ?? '';
+    _customCjkFontFamily =
+        _prefs.getString(_customCjkFontFamilyKey)?.trim() ?? '';
     _fontScale = _prefs.getDouble(_fontKey) ?? 1.0;
     _interfaceScale = _prefs.getDouble(_interfaceScaleKey) ?? 1.0;
     _circularGroupAvatars = _prefs.getBool(_groupAvatarCircleKey) ?? true;
     _showChatFolderFilter = _prefs.getBool(_chatFolderFilterKey) ?? false;
+    _showChatListSearch = _prefs.getBool(_chatListSearchKey) ?? true;
     _showMemberTags = _prefs.getBool(_memberTagsKey) ?? false;
     _showPremiumNameColors = _prefs.getBool(_premiumNameColorsKey) ?? true;
     _showPremiumEmojiStatus = _prefs.getBool(_premiumEmojiStatusKey) ?? true;
@@ -58,6 +595,7 @@ class ThemeController extends ChangeNotifier {
         _prefs.getBool(_chatPremiumEmojiStatusKey) ?? true;
     _showMessageMetaIndicators =
         _prefs.getBool(_messageMetaIndicatorsKey) ?? false;
+    _openChatsAtLatest = _prefs.getBool(_openChatsAtLatestKey) ?? false;
     _groupImageMessages = _prefs.getBool(_groupImageMessagesKey) ?? false;
     _showMomentsTab = _prefs.getBool(_showMomentsTabKey) ?? true;
     _unreadBadgeMode = UnreadBadgeMode.values.firstWhere(
@@ -69,16 +607,22 @@ class ThemeController extends ChangeNotifier {
 
   static const _modeKey = 'appearanceMode';
   static const _brandKey = 'brandColor';
+  static const _fontChoiceKey = 'fontChoice';
+  static const _cjkFontChoiceKey = 'cjkFontChoice';
+  static const _customPrimaryFontFamilyKey = 'customPrimaryFontFamily';
+  static const _customCjkFontFamilyKey = 'customCjkFontFamily';
   static const _fontKey = 'fontScale';
   static const _interfaceScaleKey = 'interfaceScale';
   static const _groupAvatarCircleKey = 'circularGroupAvatars';
   static const _chatFolderFilterKey = 'showChatFolderFilter';
+  static const _chatListSearchKey = 'showChatListSearch';
   static const _memberTagsKey = 'showMemberTags';
   static const _premiumNameColorsKey = 'showPremiumNameColors';
   static const _premiumEmojiStatusKey = 'showPremiumEmojiStatus';
   static const _chatPremiumNameColorsKey = 'showChatPremiumNameColors';
   static const _chatPremiumEmojiStatusKey = 'showChatPremiumEmojiStatus';
   static const _messageMetaIndicatorsKey = 'showMessageMetaIndicators';
+  static const _openChatsAtLatestKey = 'openChatsAtLatest';
   static const _groupImageMessagesKey = 'groupImageMessages';
   static const _showMomentsTabKey = 'showMomentsTab';
   static const _unreadBadgeModeKey = 'unreadBadgeMode';
@@ -91,16 +635,22 @@ class ThemeController extends ChangeNotifier {
   final SharedPreferences _prefs;
   late AppearanceMode _mode;
   late Color _brandColor;
+  late AppFontChoice _fontChoice;
+  late AppFontChoice _cjkFontChoice;
+  late String _customPrimaryFontFamily;
+  late String _customCjkFontFamily;
   late double _fontScale;
   late double _interfaceScale;
   late bool _circularGroupAvatars;
   bool _showChatFolderFilter = false;
+  bool _showChatListSearch = true;
   bool _showMemberTags = false;
   bool _showPremiumNameColors = true;
   bool _showPremiumEmojiStatus = true;
   bool _showChatPremiumNameColors = true;
   bool _showChatPremiumEmojiStatus = true;
   bool _showMessageMetaIndicators = false;
+  bool _openChatsAtLatest = false;
   bool _groupImageMessages = false;
   bool _showMomentsTab = true;
   late UnreadBadgeMode _unreadBadgeMode;
@@ -108,14 +658,26 @@ class ThemeController extends ChangeNotifier {
   AppearanceMode get mode => _mode;
   ThemeMode get themeMode => _mode.themeMode;
   Color get brandColor => _brandColor;
+  AppFontChoice get fontChoice => _fontChoice;
+  AppFontChoice get cjkFontChoice => _cjkFontChoice;
+  String get customPrimaryFontFamily => _customPrimaryFontFamily;
+  String get customCjkFontFamily => _customCjkFontFamily;
+  String get effectivePrimaryFontLabel => _customPrimaryFontFamily.isNotEmpty
+      ? _customPrimaryFontFamily
+      : _fontChoice.label;
+  String get effectiveCjkFontLabel => _customCjkFontFamily.isNotEmpty
+      ? _customCjkFontFamily
+      : _cjkFontChoice.label;
   bool get circularGroupAvatars => _circularGroupAvatars;
   bool get showChatFolderFilter => _showChatFolderFilter;
+  bool get showChatListSearch => _showChatListSearch;
   bool get showMemberTags => _showMemberTags;
   bool get showPremiumNameColors => _showPremiumNameColors;
   bool get showPremiumEmojiStatus => _showPremiumEmojiStatus;
   bool get showChatPremiumNameColors => _showChatPremiumNameColors;
   bool get showChatPremiumEmojiStatus => _showChatPremiumEmojiStatus;
   bool get showMessageMetaIndicators => _showMessageMetaIndicators;
+  bool get openChatsAtLatest => _openChatsAtLatest;
   bool get groupImageMessages => _groupImageMessages;
   bool get showMomentsTab => _showMomentsTab;
   UnreadBadgeMode get unreadBadgeMode => _unreadBadgeMode;
@@ -142,6 +704,31 @@ class ThemeController extends ChangeNotifier {
     notifyListeners();
   }
 
+  set fontChoice(AppFontChoice value) {
+    _fontChoice = value;
+    _prefs.setString(_fontChoiceKey, value.name);
+    notifyListeners();
+  }
+
+  set cjkFontChoice(AppFontChoice value) {
+    if (!value.isCjk) return;
+    _cjkFontChoice = value;
+    _prefs.setString(_cjkFontChoiceKey, value.name);
+    notifyListeners();
+  }
+
+  set customPrimaryFontFamily(String value) {
+    _customPrimaryFontFamily = value.trim();
+    _prefs.setString(_customPrimaryFontFamilyKey, _customPrimaryFontFamily);
+    notifyListeners();
+  }
+
+  set customCjkFontFamily(String value) {
+    _customCjkFontFamily = value.trim();
+    _prefs.setString(_customCjkFontFamilyKey, _customCjkFontFamily);
+    notifyListeners();
+  }
+
   set fontScale(double value) {
     _fontScale = value.clamp(minFontScale, maxFontScale);
     _prefs.setDouble(_fontKey, _fontScale);
@@ -163,6 +750,12 @@ class ThemeController extends ChangeNotifier {
   set showChatFolderFilter(bool value) {
     _showChatFolderFilter = value;
     _prefs.setBool(_chatFolderFilterKey, value);
+    notifyListeners();
+  }
+
+  set showChatListSearch(bool value) {
+    _showChatListSearch = value;
+    _prefs.setBool(_chatListSearchKey, value);
     notifyListeners();
   }
 
@@ -199,6 +792,12 @@ class ThemeController extends ChangeNotifier {
   set showMessageMetaIndicators(bool value) {
     _showMessageMetaIndicators = value;
     _prefs.setBool(_messageMetaIndicatorsKey, value);
+    notifyListeners();
+  }
+
+  set openChatsAtLatest(bool value) {
+    _openChatsAtLatest = value;
+    _prefs.setBool(_openChatsAtLatestKey, value);
     notifyListeners();
   }
 

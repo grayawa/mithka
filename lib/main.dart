@@ -63,13 +63,26 @@ class _MithkaAppState extends State<MithkaApp> {
     NotificationController.shared.start();
   }
 
-  ThemeData _themeData(Brightness brightness) {
+  ThemeData _themeData(Brightness brightness, ThemeController theme) {
+    final fontChoice = theme.fontChoice;
+    final cjkFontChoice = theme.cjkFontChoice;
+    final customPrimary = theme.customPrimaryFontFamily;
+    final customCjk = theme.customCjkFontFamily;
     final colors = brightness == Brightness.dark
         ? AppColors.dark
         : AppColors.light;
-    return ThemeData(
+    final fallback = fontChoice.effectiveFallback(
+      cjkFontChoice,
+      null,
+      customCjk,
+    );
+    final base = ThemeData(
       brightness: brightness,
       useMaterial3: true,
+      fontFamily: customPrimary.isNotEmpty
+          ? customPrimary
+          : fontChoice.fontFamily,
+      fontFamilyFallback: fallback,
       scaffoldBackgroundColor: colors.background,
       colorScheme: ColorScheme.fromSeed(
         seedColor: AppTheme.brand,
@@ -78,6 +91,20 @@ class _MithkaAppState extends State<MithkaApp> {
       extensions: [colors],
       splashFactory: NoSplash.splashFactory,
       highlightColor: Colors.transparent,
+    );
+    return base.copyWith(
+      textTheme: fontChoice.applyTextTheme(
+        base.textTheme,
+        cjkFallback: cjkFontChoice,
+        customPrimaryFamily: customPrimary,
+        customCjkFamily: customCjk,
+      ),
+      primaryTextTheme: fontChoice.applyTextTheme(
+        base.primaryTextTheme,
+        cjkFallback: cjkFontChoice,
+        customPrimaryFamily: customPrimary,
+        customCjkFamily: customCjk,
+      ),
     );
   }
 
@@ -97,8 +124,8 @@ class _MithkaAppState extends State<MithkaApp> {
             navigatorKey: appNavigatorKey,
             title: 'Mithka',
             debugShowCheckedModeBanner: false,
-            theme: _themeData(Brightness.light),
-            darkTheme: _themeData(Brightness.dark),
+            theme: _themeData(Brightness.light, theme),
+            darkTheme: _themeData(Brightness.dark, theme),
             themeMode: theme.themeMode,
             // Apply the user's chosen font size app-wide (设置 › 通用 › 字体大小).
             builder: (context, child) {

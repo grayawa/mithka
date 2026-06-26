@@ -41,6 +41,10 @@ import 'sticker_store.dart';
 
 enum _Panel { none, function, emoji, sticker, voice }
 
+class _SendComposerIntent extends Intent {
+  const _SendComposerIntent();
+}
+
 class ChatInputBar extends StatefulWidget {
   const ChatInputBar({super.key, required this.vm, required this.onStartCall});
   final ChatViewModel vm;
@@ -257,6 +261,27 @@ class _ChatInputBarState extends State<ChatInputBar> {
     showToast(context, '无法打开$what');
   }
 
+  void _sendCurrentText() {
+    if (_controller.text.trim().isEmpty) return;
+    final (text, entities) = _controller.toFormatted();
+    vm.sendFormatted(text, entities);
+    _controller.clear();
+    _focus.requestFocus();
+  }
+
+  Future<void> _handlePaste(ContextMenuButtonItem pasteItem) async {
+    final pastedImage = await _pasteImageFromClipboard(showNoImageToast: false);
+    if (!pastedImage) pasteItem.onPressed?.call();
+    _restoreKeyboardFocus();
+  }
+
+  void _restoreKeyboardFocus() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.colors;
@@ -451,43 +476,68 @@ class _ChatInputBarState extends State<ChatInputBar> {
                     const SizedBox(width: 8),
                   ],
                   Expanded(
-                    child: TextField(
-                      controller: _controller,
-                      focusNode: _focus,
-                      minLines: 1,
-                      maxLines: 4,
-                      style: TextStyle(fontSize: 16, color: c.textPrimary),
-                      contentInsertionConfiguration:
-                          ContentInsertionConfiguration(
-                            allowedMimeTypes: _imageMimeTypes,
-                            onContentInserted: _handleInsertedContent,
-                          ),
-                      contextMenuBuilder:
-                          (
-                            BuildContext context,
-                            EditableTextState editableTextState,
-                          ) {
-                            final items =
-                                editableTextState.contextMenuButtonItems;
-                            items.insert(
-                              0,
-                              ContextMenuButtonItem(
-                                label: '粘贴图片',
-                                onPressed: () {
-                                  ContextMenuController.removeAny();
-                                  unawaited(_pasteImageFromClipboard());
+                    child: Shortcuts(
+                      shortcuts: const {
+                        SingleActivator(LogicalKeyboardKey.enter):
+                            _SendComposerIntent(),
+                        SingleActivator(LogicalKeyboardKey.numpadEnter):
+                            _SendComposerIntent(),
+                      },
+                      child: Actions(
+                        actions: {
+                          _SendComposerIntent:
+                              CallbackAction<_SendComposerIntent>(
+                                onInvoke: (_) {
+                                  _sendCurrentText();
+                                  return null;
                                 },
                               ),
-                            );
-                            return AdaptiveTextSelectionToolbar.buttonItems(
-                              anchors: editableTextState.contextMenuAnchors,
-                              buttonItems: items,
-                            );
-                          },
-                      decoration: const InputDecoration(
-                        hintText: '发送消息…',
-                        border: InputBorder.none,
-                        isCollapsed: true,
+                        },
+                        child: TextField(
+                          controller: _controller,
+                          focusNode: _focus,
+                          minLines: 1,
+                          maxLines: 4,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _sendCurrentText(),
+                          style: TextStyle(fontSize: 16, color: c.textPrimary),
+                          contentInsertionConfiguration:
+                              ContentInsertionConfiguration(
+                                allowedMimeTypes: _imageMimeTypes,
+                                onContentInserted: _handleInsertedContent,
+                              ),
+                          contextMenuBuilder:
+                              (
+                                BuildContext context,
+                                EditableTextState editableTextState,
+                              ) {
+                                final items = editableTextState
+                                    .contextMenuButtonItems
+                                    .map((item) {
+                                      if (item.type !=
+                                          ContextMenuButtonType.paste) {
+                                        return item;
+                                      }
+                                      return ContextMenuButtonItem(
+                                        type: item.type,
+                                        label: item.label,
+                                        onPressed: () =>
+                                            unawaited(_handlePaste(item)),
+                                      );
+                                    })
+                                    .toList();
+                                return AdaptiveTextSelectionToolbar.buttonItems(
+                                  anchors: editableTextState.contextMenuAnchors,
+                                  buttonItems: items,
+                                );
+                              },
+                          decoration: const InputDecoration(
+                            hintText: '发送消息…',
+                            border: InputBorder.none,
+                            isCollapsed: true,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -498,11 +548,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
           if (hasText) ...[
             const SizedBox(width: 8),
             GestureDetector(
-              onTap: () {
-                final (text, entities) = _controller.toFormatted();
-                vm.sendFormatted(text, entities);
-                _controller.clear();
-              },
+              onTap: _sendCurrentText,
               child: Container(
                 width: 36,
                 height: 36,
@@ -631,24 +677,28 @@ class _ChatInputBarState extends State<ChatInputBar> {
     await _editAndSendImageBytes(data, content.mimeType);
   }
 
-  Future<void> _pasteImageFromClipboard() async {
+  Future<bool> _pasteImageFromClipboard({bool showNoImageToast = true}) async {
     try {
       final image = await _clipboardChannel.invokeMapMethod<String, dynamic>(
         'readImage',
       );
       final data = image?['data'];
       if (data is! Uint8List || data.isEmpty) {
-        if (mounted) showToast(context, '剪贴板没有图片');
-        return;
+        if (showNoImageToast && mounted) showToast(context, '剪贴板没有图片');
+        return false;
       }
       final mimeType = (image?['mimeType'] as String?) ?? 'image/png';
       if (_isGifMime(mimeType)) {
         await _sendAnimationBytes(data, mimeType);
-        return;
+        _restoreKeyboardFocus();
+        return true;
       }
       await _editAndSendImageBytes(data, mimeType);
+      _restoreKeyboardFocus();
+      return true;
     } catch (_) {
-      if (mounted) showToast(context, '无法读取粘贴的图片');
+      if (showNoImageToast && mounted) showToast(context, '无法读取粘贴的图片');
+      return false;
     }
   }
 

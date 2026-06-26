@@ -25,6 +25,8 @@ class GroupAssistantRow extends StatelessWidget {
 
   ChatSummary? get _latest => archived.isEmpty ? null : archived.first;
   int get _totalUnread => archived.fold(0, (a, c) => a + c.unreadCount);
+  bool get _hasUnmutedUnread =>
+      archived.any((c) => c.unreadCount > 0 && !c.isMuted);
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +63,10 @@ class GroupAssistantRow extends StatelessWidget {
                   Positioned(
                     right: -AppSpacing.sm,
                     top: -(AppSpacing.xs + 1),
-                    child: UnreadBadge(count: _totalUnread),
+                    child: UnreadBadge(
+                      count: _totalUnread,
+                      muted: !_hasUnmutedUnread,
+                    ),
                   ),
               ],
             ),

@@ -270,11 +270,14 @@ class ChatPreviewText extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.colors;
     final isRed = _redTags.any(message.startsWith);
+    final baseStyle = DefaultTextStyle.of(
+      context,
+    ).style.merge(const TextStyle(fontSize: AppTextSize.footnote));
     return RichText(
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       text: TextSpan(
-        style: const TextStyle(fontSize: AppTextSize.footnote),
+        style: baseStyle,
         children: [
           if (draft)
             TextSpan(
